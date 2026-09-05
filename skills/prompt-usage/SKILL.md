@@ -154,24 +154,31 @@ do not claim a final measurement was obtained while no tool could run.
 
 ## Required final-answer footer
 
-Append a compact footer using only the returned values:
+Use this exact compact structure, substituting the returned values:
 
-> Usage since snapshot (as logged): TOTAL tokens — FRESH fresh input, CACHED cached
-> input, OUTPUT output. Known API estimate: COST [coverage]. MCP: CALLS calls,
-> ERRORS errors. Warning: STATUS.
+> Tokens: TOTAL tokens — FRESH fresh input, CACHED cached input, OUTPUT output. Est. cost: COST. MCP: CALLS calls, ERRORS errors.
 
-Replace the uppercase labels with actual values, not this template. Mention
-unpriced steps whenever present; null cost means unknown, not $0. If the warning
-is `high`, name the flagged metric and threshold. If history is insufficient or
-usage uncertain, say so instead of calling it normal. Optionally include reasoning
-tokens, clearly as a subset of output. Never add reasoning to total again.
+Use thousands separators for token counts. Round the estimated dollar cost to
+the nearest cent and always display exactly two decimal places (for example,
+`$0.49519` becomes `$0.50`, and `$1` becomes `$1.00`). Apply this formatting to
+partial estimates too; keep unavailable costs marked as unavailable.
+Do not append a fully-priced label, routine warning status, scope disclaimer,
+or billing disclaimer. Do not add reasoning tokens to output or total again.
 
-Include this short scope note: “Separate agent sessions and the final answer
-generated afterward are excluded.” The server isolates the supplied session;
-work by multiple actors sharing that session cannot be separated. Delayed log
-records may cross the snapshot boundary. This is API-equivalent cost, not actual
-billing or subscription quota. Do not represent the result as exact whole-prompt
-billing or as a measurement of the not-yet-generated final answer.
+Append a warning only when the server returns `warning.status = "high"` with
+an actionable flagged metric. Briefly name the metric and threshold. Omit the
+warning entirely for normal usage, insufficient history, uncertain usage or an
+unevaluated comparison; do not imply those states mean consumption is normal.
+
+Keep cost uncertainty in the cost field rather than a routine warning:
+use `Est. cost: $X (partial; N unpriced steps).` for partial pricing and
+`Est. cost: unavailable.` for an entirely unpriced result. Never render unknown
+cost as zero. Request failures still use the error footer below.
+
+Interpretation for the agent, not additional footer text: values cover newly
+logged usage since the snapshot, exclude separate agent sessions and cannot
+include an answer generated after the check. Prices are API-equivalent estimates,
+not actual bills. Explain these limits if asked; do not append them routinely.
 
 ## Error handling: continue work and report at the end
 

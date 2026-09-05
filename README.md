@@ -110,6 +110,15 @@ the final answer. Honor the user's stop, resume and skip instructions.
 A skill is an instruction-based workflow, not an executable pre/post hook.
 Automatic skill discovery alone does not guarantee every-prompt execution.
 
+### Compact usage output
+
+The skill reports: `Tokens: TOTAL tokens — FRESH fresh input, CACHED cached input,
+OUTPUT output. Est. cost: COST. MCP: CALLS calls, ERRORS errors.`
+Estimated costs are rounded to two decimal places (for example, `$0.50`).
+Only actionable high-usage warnings are appended. Normal/insufficient-history
+statuses and routine scope/billing disclaimers are omitted. Partial or unavailable
+pricing remains explicit in the cost field; tracking errors are still reported.
+
 ### User controls
 
 | Request | Effect |
