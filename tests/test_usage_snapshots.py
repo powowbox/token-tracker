@@ -83,4 +83,56 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(self.store.consumption(sid,min_samples=2)['warning']['sample_count'],2)
 
 
+class ClaudeSnapshotTests(unittest.TestCase):
+    def test_claude_isolated_cache_writes_and_late_mcp(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); path=root/'session.jsonl'
+            def append(records):
+                with path.open('a') as f:
+                    for r in records:f.write(json.dumps(r)+'\n')
+            def assistant(mid, amount, calls=None):
+                return {'type':'assistant','sessionId':'session','cwd':'/project','timestamp':'2026-09-05T10:00:00Z',
+                    'message':{'id':mid,'model':'claude-sonnet-4-6','usage':{'input_tokens':amount,'output_tokens':5,
+                    'cache_read_input_tokens':20,'cache_creation_input_tokens':10},'content':calls or []}}
+            append([assistant('one',10,[{'type':'tool_use','id':'old','name':'mcp__s__t'}])])
+            sub=root/'subagents';sub.mkdir();child=sub/'agent-child.jsonl';child.write_text(json.dumps(assistant('child',99999))+'\n')
+            store=SnapshotStore(root/'store.db',lambda:[path,child])
+            sid=store.create('claude:session')['sid']
+            append([assistant('two',30,[{'type':'tool_use','id':'new','name':'mcp__s__t'}]),
+                {'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'old','content':'old'},
+                 {'type':'tool_result','tool_use_id':'new','content':'failed','is_error':True}]}}])
+            r=store.consumption(sid)
+            self.assertEqual(r['session_id'],'claude:session')
+            self.assertEqual(r['tokens']['fresh_input'],40)
+            self.assertEqual(r['tokens']['total'],65)
+            self.assertEqual(r['mcp'],{'calls':1,'errors':1})
+            self.assertEqual(r['pricing']['coverage'],'priced')
+            self.assertEqual(store.consumption(sid)['tokens'],r['tokens'])
+            append([assistant('two',30)])
+            self.assertEqual(store.consumption(sid)['tokens']['total'],65)
+            append([assistant('two',20)])
+            with self.assertRaises(SnapshotError) as e:store.consumption(sid)
+            self.assertEqual(e.exception.status,409)
+
+    def test_claude_streamed_message_crosses_snapshot(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);path=root/'session.jsonl'
+            def record(output):
+                return json.dumps({'type':'assistant','sessionId':'session','message':{'id':'same',
+                    'model':'claude-sonnet-4-6','usage':{'input_tokens':20,'output_tokens':output},'content':[]}})+'\n'
+            path.write_text(record(5))
+            store=SnapshotStore(root/'store.db',lambda:[path])
+            sid=store.create('claude:session')['sid']
+            with path.open('a') as f:f.write(record(15))
+            result=store.consumption(sid)
+            self.assertEqual(result['tokens']['total'],10)
+            self.assertEqual(result['tokens']['fresh_input'],0)
+
+    def test_unknown_source_rejected_without_guessing_codex(self):
+        with tempfile.TemporaryDirectory() as d:
+            store=SnapshotStore(Path(d)/'store.db',lambda:[])
+            with self.assertRaises(SnapshotError) as e:store.create('cursor:session')
+            self.assertEqual(e.exception.status,422)
+
+
 if __name__=='__main__':unittest.main()

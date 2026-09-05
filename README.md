@@ -54,6 +54,19 @@ read as data; historical commands are never executed.
 
 ## Agent snapshots: start, work, measure
 
+Snapshots now support **Codex and Claude Code main sessions**. Supply a
+source-qualified `session_id`: `codex:<session UUID>` or `claude:<session ID>`.
+The server advertises `supported_snapshot_sources` in `/api/health`; unsupported
+sources return HTTP 422 rather than being interpreted as Codex. Bare IDs still
+mean Codex for compatibility. Claude's separate subagent logs are excluded, and
+repeated streamed usage records are reconciled by message identity; decreasing
+counters or conflicting identities fail explicitly instead of inventing a delta.
+
+The skill is independent of the client: use any available HTTP tool or curl.
+RTK is optional and no Codex-only environment variable is universally required.
+Use trusted session metadata from the integration; an agent without a matching
+server log adapter cannot measure itself merely by issuing these API calls.
+
 The recommended agent workflow now needs **no turn ID**:
 
 1. Before task execution, POST the agent's session ID to `/api/usage-snapshots` and save the returned `sid`.
@@ -70,10 +83,11 @@ See [the agent usage guide](docs/AGENT_USAGE.md) for requests, JetBrains access 
 
 The portable skill is included at [skills/prompt-usage/SKILL.md](skills/prompt-usage/SKILL.md).
 Copy the entire `skills/prompt-usage` folder into your agent's supported skills
-directory. For a standard Codex installation, use `$CODEX_HOME/skills` when
+directory, or use its persistent-instruction mechanism if it does not discover
+SKILL.md files. For a standard Codex installation, use `$CODEX_HOME/skills` when
 configured, otherwise `~/.codex/skills`. Review an existing copy before replacing
 it. Reload the agent's skill discovery or start a new session, then invoke
-`$prompt-usage`. The skill calls the local tracker API directly and contains no
+`$prompt-usage` in Codex or the equivalent mechanism in your agent. The skill calls the local tracker API directly and contains no
 personal installation path.
 
 The `prompt-usage` skill instructs the agent to use the two-request snapshot

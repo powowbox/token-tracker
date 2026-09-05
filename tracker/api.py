@@ -114,7 +114,8 @@ def health():
     with db() as c:
         n = c.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     return {"ok": True, "messages": n, "db": str(DEFAULT_DB_PATH),
-            "documentation_url": "/api/docs/operations"}
+            "documentation_url": "/api/docs/operations",
+            "supported_snapshot_sources": ["codex", "claude"]}
 
 
 @app.get("/api/docs/operations", response_class=PlainTextResponse)

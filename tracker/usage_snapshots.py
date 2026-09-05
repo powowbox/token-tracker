@@ -5,9 +5,10 @@ import sqlite3
 import uuid
 from contextlib import closing
 from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
 
-from . import parse_codex
+from . import parse_codex, parse_claude
 from .pricing import cost_usd, reload as reload_prices
 from .prompt_usage import uncertain, warnings_for
 
@@ -25,7 +26,7 @@ def now():
 class SnapshotStore:
     def __init__(self, path=None, discover=None):
         self.path = path or Path(__file__).resolve().parent.parent / 'usage-snapshots.sqlite3'
-        self.discover = discover or parse_codex.discover_files
+        self.discover = discover
 
     def connection(self):
         c = sqlite3.connect(self.path)
@@ -35,8 +36,17 @@ class SnapshotStore:
         return c
 
     def sources(self, session_id):
+        source, identifier = session_id.split(':', 1)
+        if source not in ('codex', 'claude') or not identifier:
+            raise SnapshotError(422, 'Unsupported snapshot source; supported sources: codex, claude')
+        parser = parse_codex if source == 'codex' else parse_claude
         paths = []
-        for path in self.discover():
+        for path in (self.discover or parser.discover_files)():
+            if source == 'claude':
+                # Main-session logs only: Claude subagent logs share the parent ID.
+                if path.parent.name != 'subagents' and path.stem == identifier:
+                    paths.append(path)
+                continue
             try:
                 with path.open('rb') as f:
                     for _, line in zip(range(100), f):
@@ -54,7 +64,7 @@ class SnapshotStore:
         return paths
 
     @staticmethod
-    def read(path, baseline=None):
+    def read(path, baseline=None, source="codex"):
         st = path.stat()
         with path.open('rb') as f:
             data = f.read(st.st_size)
@@ -64,7 +74,46 @@ class SnapshotStore:
                 raise SnapshotError(409, 'Source history changed since snapshot; create a new snapshot')
         else:
             offset = 0
-        parsed, consumed = parse_codex.parse_file(path, start_offset=offset, end_offset=st.st_size)
+        if source == 'codex':
+            parsed, consumed = parse_codex.parse_file(path, start_offset=offset, end_offset=st.st_size)
+        else:
+            # Replay complete Claude prefix for late results; slice usage by source line.
+            parsed, consumed = parse_claude.parse_file(path, end_offset=st.st_size)
+            old_lines = baseline['lines'] if baseline else 0
+            completed_calls = set()
+            row_by_line = {r.source_line: r for r in parsed.messages}
+            before, latest = {}, {}
+            fields = ('input_tokens', 'output_tokens', 'cache_read', 'cache_write_5m', 'cache_write_1h', 'reasoning_tokens')
+            for line_no, raw in enumerate(data[:consumed].splitlines(), 1):
+                try:
+                    item = json.loads(raw)
+                except ValueError:
+                    continue
+                if item.get('sessionId') and item['sessionId'] != path.stem:
+                    raise SnapshotError(409, 'Claude log contains conflicting session identities')
+                message = item.get('message') or {}
+                if item.get('type') == 'assistant' and message.get('usage'):
+                    mid = message.get('id') or item.get('uuid') or f'line:{line_no}'
+                    current = row_by_line[line_no]
+                    previous = latest.get(mid)
+                    if previous and (previous.model != current.model or any(
+                            getattr(current, k) < getattr(previous, k) for k in fields)):
+                        raise SnapshotError(409, 'Claude message usage changed non-monotonically; exact delta unavailable')
+                    latest[mid] = current
+                    if line_no <= old_lines:
+                        before[mid] = current
+                if item.get('type') == 'user' and isinstance(message.get('content'), list):
+                    completed_calls.update(b.get('tool_use_id') for b in message['content']
+                                           if isinstance(b, dict) and b.get('type') == 'tool_result')
+            parsed.messages = []
+            for mid, current in latest.items():
+                prior = before.get(mid)
+                delta = {k: getattr(current, k) - (getattr(prior, k) if prior else 0) for k in fields}
+                if any(delta.values()):
+                    parsed.messages.append(replace(current, **delta))
+            parsed.mcp_calls = list({c.call_id: c for c in parsed.mcp_calls if c.call_id in completed_calls}.values())
+            parsed.session.session_kind = 'user'
+
         after = path.stat()
         if (st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns) != (after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
             raise SnapshotError(503, 'Source log changed during refresh; retry with the same SID')
@@ -73,7 +122,7 @@ class SnapshotStore:
         return parsed, checkpoint
 
     def create(self, session_id):
-        session_id = session_id if session_id.startswith('codex:') else 'codex:' + session_id
+        session_id = session_id if ':' in session_id else 'codex:' + session_id
         paths = self.sources(session_id)
         if not paths:
             raise SnapshotError(404, 'Session log not found yet; retry after the session log is created')
@@ -82,7 +131,7 @@ class SnapshotStore:
             raise SnapshotError(409, 'Session has multiple source logs; cannot safely isolate its usage')
         baseline = {}
         for path in paths:
-            parsed, baseline[str(path)] = self.read(path)
+            parsed, baseline[str(path)] = self.read(path, source=session_id.split(':', 1)[0])
             if parsed.session.session_id != session_id:
                 raise SnapshotError(503, 'Session identity changed during refresh; retry')
         body = dict(session_id=session_id, created_at=now(), sources=baseline)
@@ -104,16 +153,17 @@ class SnapshotStore:
         rows, calls = [], []
         for path in paths:
             baseline = body['sources'][str(path)]
-            parsed, _ = self.read(path, baseline)
+            parsed, _ = self.read(path, baseline, source=body['session_id'].split(':', 1)[0])
             rows.extend(parsed.messages)
             # A result arriving late for a pre-snapshot invocation is not new work.
             calls.extend(c for c in parsed.mcp_calls if c.source_line > baseline['lines'])
         reload_prices()
-        costs = [None if uncertain(r.usage_status) else cost_usd('codex', r.model,
+        costs = [None if uncertain(r.usage_status) else cost_usd(r.tool, r.model,
                  input_tokens=r.input_tokens, cache_read=r.cache_read, output_tokens=r.output_tokens,
-                 cache_write_input_tokens=r.cache_write_input_tokens) for r in rows]
+                 cache_write_input_tokens=r.cache_write_input_tokens,
+                 cache_write_5m=r.cache_write_5m, cache_write_1h=r.cache_write_1h) for r in rows]
         priced = sum(c is not None for c in costs)
-        fresh = sum(r.input_tokens for r in rows)
+        fresh = sum(r.input_tokens + r.cache_write_5m + r.cache_write_1h for r in rows)
         cached = sum(r.cache_read for r in rows)
         output = sum(r.output_tokens for r in rows)
         result = dict(sid=sid, session_id=body['session_id'], created_at=body['created_at'], refreshed_at=now(),
@@ -133,6 +183,7 @@ class SnapshotStore:
             reasoning_efforts=sorted({r.reasoning_effort or 'unknown' for r in rows}))
         with closing(self.connection()) as c, c:
             peers = [json.loads(r[0]) for r in c.execute('SELECT body FROM reports WHERE sid != ?', (sid,))]
+            peers = [r for r in peers if r['session_id'].split(':', 1)[0] == body['session_id'].split(':', 1)[0]]
             result['warning'] = warnings_for(comparison, peers, days=days, min_samples=min_samples,
                                               percentile=percentile, multiplier=multiplier)
             result['warning']['baseline'] = 'previously_reported_snapshot_intervals'

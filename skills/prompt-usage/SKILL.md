@@ -7,7 +7,7 @@ description: Require a Token Tracker snapshot before task work and a session-iso
 
 Apply the two-request workflow to each new user task/prompt while this skill is
 enabled and the user has not disabled or skipped tracking. Do not substitute a whole-session total, latest-turn guess, or estimated
-word count. Do not require `CODEX_TURN_ID`.
+word count. No agent-specific turn variable is required.
 
 ## User control and session notice
 
@@ -53,9 +53,34 @@ operation, before repository inspection, searches, tools, edits or delegation.
 A short acknowledgement may precede it. Model processing needed to reach this
 request cannot be measured retroactively.
 
-Read only `CODEX_THREAD_ID` and `CODEX_SESSION_ID` from your command environment.
-Use `CODEX_THREAD_ID`, falling back to `CODEX_SESSION_ID`. If both are present,
-they must match; if neither is present or they conflict, do not guess.
+## Agent compatibility and session identity
+
+This is a client-independent HTTP workflow. Use the agent's available HTTP client
+or command tool; neither Codex tools nor RTK is required. The server must run on
+an address reachable from that agent. `127.0.0.1:8732` refers to the agent's own
+machine; it does not reach the user's computer from a remote/cloud agent.
+Use an alternative server address only when explicitly configured by the user.
+
+Identify the **current agent's own tracked session** from trusted integration
+metadata or an explicitly supplied tracker session ID. Preserve the source prefix
+when present (for example, `codex:<session UUID>`). Never use another agent's ID,
+the latest project session, a generated UUID, or a model/API request ID as a substitute.
+Do not assume every integration exposes session identifiers as environment variables.
+
+- Codex: inspect only `CODEX_THREAD_ID` and `CODEX_SESSION_ID`. Use the former,
+  falling back to the latter; if both exist, they must match.
+- Other agents: use the session identifier supplied by their integration and the
+  tracker's adapter for that source. Do not invent an environment-variable name.
+  If the current session cannot be identified or its source is unsupported,
+  continue the user's task and report that measurement is unavailable.
+
+**Current server compatibility:** `codex:<session UUID>` and
+`claude:<main session ID>` (Claude Code). Use the explicit prefix to avoid source
+ambiguity. Bare identifiers are treated as Codex for backward compatibility.
+Claude subagent log files are excluded from parent-session snapshots. For an
+unknown source, check `supported_snapshot_sources` in `/api/health` when available;
+never relabel the source to bypass an unsupported-source error. Additional agents
+become measurable when a matching source adapter is installed on the server.
 
 Send this HTTP request using the available HTTP client or command tool:
 
@@ -66,14 +91,18 @@ Content-Type: application/json
 {"session_id":"<verified session ID>"}
 ```
 
-For a command tool, after checking that the session variables do not conflict:
+Equivalent command example (replace the verified identifier; do not send the placeholder):
 
 ```sh
-rtk proxy curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
+curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
   -H 'Content-Type: application/json' \
-  -d "{\"session_id\":\"${CODEX_THREAD_ID:-${CODEX_SESSION_ID:?No session ID available}}\"}" \
+  -d '{"session_id":"<verified tracker session ID>"}' \
   http://127.0.0.1:8732/api/usage-snapshots
 ```
+
+Follow the host's command conventions: when RTK is required and installed, prefix
+curl with `rtk proxy`. With a native HTTP tool, use the same method, body and URL
+without a shell command.
 
 A successful response is HTTP 201 with JSON containing `sid` and `session_id`.
 Keep the returned `sid` and `session_id` in task context. This SID belongs to this
@@ -101,7 +130,7 @@ The request needs no body. Substitute the actual SID returned by the first reque
 For a command tool:
 
 ```sh
-rtk proxy curl --fail --silent --show-error --connect-timeout 3 --max-time 10 -X POST \
+curl --fail --silent --show-error --connect-timeout 3 --max-time 10 -X POST \
   http://127.0.0.1:8732/api/usage-snapshots/RETURNED_SID/consumption
 ```
 
@@ -193,12 +222,14 @@ automatically. No personal installation path is needed in this skill.
 Choose recovery advice based on the actual error:
 
 - Sandbox/permission denied: explain that the integration needs permitted localhost
-  access; restarting a healthy server does not fix sandbox restrictions. JetBrains
-  has required an approved execution route outside the sandbox in this setup.
+  access; restarting a healthy server does not fix sandbox restrictions. Use
+  only the host integration's permitted access route.
 - Missing/conflicting session variables: explain which identifier is unavailable
   or conflicting; restarting Token Tracker will not supply it.
 - HTTP 404: the session log or SID was not found. A missing initial log may appear
   later, but the current task lacks a valid baseline if creation failed.
+- HTTP 422: invalid request or unsupported log source; report the limitation
+  and continue without measurement.
 - HTTP 409: source history changed or is ambiguous; do not claim a safe delta or
   create a replacement baseline for the completed task.
 - HTTP 503, timeout, or other server error: report the error; suggest checking
@@ -210,7 +241,16 @@ snapshot failure cannot be retroactively repaired by restarting the server.
 
 ## Installation and enforcement boundary
 
-Use a direct HTTP client, or curl through RTK as shown above. No helper script,
+Install this folder using the target agent's supported skill mechanism. If the
+agent does not support SKILL.md discovery, add these instructions through its
+supported persistent-instruction mechanism instead. Skill directories and
+invocation syntax vary; do not assume `$prompt-usage` works in every agent.
+An optional `agents/openai.yaml` file supplies Codex UI metadata only; other
+agents can ignore it. No OpenAI-specific metadata is required to follow the HTTP
+workflow in this file.
+
+
+Use a direct HTTP client or curl; apply an RTK prefix only where required. No helper script,
 Python dependency or installed-file path is required. The local Token Tracker
 server must already be running with snapshot endpoints enabled. Do not modify
 settings, start servers or rebuild tokens.db to perform this workflow.

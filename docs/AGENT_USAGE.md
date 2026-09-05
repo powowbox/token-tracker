@@ -1,5 +1,26 @@
 # Agent usage: snapshot before work, delta afterward
 
+## Supported agents and identity
+
+The HTTP workflow is agent-independent. The server currently supports snapshot
+sources `codex` and `claude` (Claude Code main-session logs). Supply a qualified
+identifier such as `codex:<session UUID>` or `claude:<session ID>`. An unprefixed
+identifier remains Codex for backward compatibility. `/api/health` lists
+`supported_snapshot_sources`. Other sources require a server adapter and return
+HTTP 422 until supported; do not substitute another agent's session.
+
+Use trusted identity from the current integration. Codex can expose
+`CODEX_THREAD_ID`/`CODEX_SESSION_ID`; other agents need their own verified session
+metadata. There is no universal session environment variable. Use any native HTTP
+client or curl, with RTK only if required by the host. For cloud/remote agents,
+localhost is the remote machine, not the user's computer.
+
+Claude snapshots exclude separate subagent files and reconcile repeated message
+usage, including streams crossing the snapshot. Cache writes count toward fresh
+input; reported reasoning remains part of output. Non-monotonic message usage or
+conflicting identities return an explicit error. Claude whole-turn indexing through
+`/api/prompts` remains unsupported; use the snapshot workflow instead.
+
 ## Recommended two-request workflow
 
 1. **Before other task tools or commands**, send `POST /api/usage-snapshots` with

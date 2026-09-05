@@ -139,7 +139,7 @@ def _agent_meta(path: Path) -> tuple[str | None, str | None]:
     return m.get("agentType"), m.get("description")
 
 
-def parse_file(path: Path, *, start_offset: int = 0) -> tuple[ParsedFile, int]:
+def parse_file(path: Path, *, start_offset: int = 0, end_offset: int | None = None) -> tuple[ParsedFile, int]:
     """Parse from byte offset; returns (parsed, new_offset).
 
     new_offset is the byte position AFTER the last fully-parsed line. If a
@@ -180,7 +180,7 @@ def parse_file(path: Path, *, start_offset: int = 0) -> tuple[ParsedFile, int]:
                 head = g.read(start_offset)
                 line_no = head.count(b"\n")
 
-        buf = f.read()
+        buf = f.read() if end_offset is None else f.read(max(0, end_offset - start_offset))
 
     # Process complete lines only (one JSON per line). Split on b"\n"; any trailing
     # bytes without newline are a partial write — leave them for next run.
