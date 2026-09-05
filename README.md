@@ -11,7 +11,9 @@ Nothing leaves your machine.
 
 ## Changes and improvements — 2026-09-05
 
-This release includes the Codex accounting repair and partial-cost dashboard.
+This release includes the Codex accounting repair, partial-cost dashboard, and
+the portable [prompt-usage skill](skills/prompt-usage/SKILL.md) for snapshot-based
+usage reporting, with stop/resume controls and non-blocking error handling.
 
 | Area | Previous behavior | Corrected behavior |
 |------|-------------------|--------------------|
