@@ -11,10 +11,16 @@ Nothing leaves your machine.
 
 ## Changes and improvements — 2026-09-05
 
-This release includes the Codex accounting repair and partial-cost dashboard.
+This release includes the Codex accounting repair, partial-cost dashboard, 
+
+### ADD SKILL allowing the agent to give the token consumption after each prompt
+
+A portable [prompt-usage skill](skills/prompt-usage/SKILL.md) for snapshot-based usage reporting, with stop/resume controls and non-blocking error handling.
+
+### Changes 
 
 | Area | Previous behavior | Corrected behavior |
-|------|-------------------|--------------------|
+|------|-------------------|--------------------| 
 | Token accounting | Repeated events could count the same consumption again. | Reconciles cumulative counters with last-step usage; unchanged totals add no consumption. |
 | Incremental ingestion | Counter state and pending MCP results could be lost between imports. | Replays the imported prefix to restore state; unchanged files add no usage or duplicate calls. Resets, resumes, compaction and missing fields are handled explicitly. |
 | Token categories | Overlapping counters could inflate estimates. | Fresh input excludes cached input; reasoning is already included in output. Cache writes remain a subset of fresh input. |
