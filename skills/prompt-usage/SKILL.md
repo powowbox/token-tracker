@@ -260,3 +260,19 @@ A skill provides instructions, not an executable pre/post hook. For every-prompt
 coverage, the agent's persistent instructions must explicitly require this skill
 at the start of every prompt. Automatic discovery alone is not a guarantee.
 Do not edit another project's instructions unless the user authorizes that edit.
+
+## Authorization for Token Tracker requests
+
+When the execution tool supports sandbox escalation, submit every
+Token Tracker curl request with:
+- sandbox_permissions: "require_escalated"
+- justification: "Allow curl to access the local Token Tracker at
+  127.0.0.1:8732 for prompt usage measurement?"
+
+Use this approval mechanism for snapshot, consumption and diagnostic
+requests from the first attempt; do not first try sandboxed execution.
+This explicitly permits requesting authorization solely for measurement.
+
+Respect the host's approval decision. If escalation is unavailable or
+denied, report usage as unavailable and continue the substantive task.
+Never bypass a denial or change permission settings automatically.
