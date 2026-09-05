@@ -112,8 +112,8 @@ Automatic skill discovery alone does not guarantee every-prompt execution.
 
 ### Compact usage output
 
-The skill reports: `Tokens: TOTAL tokens — FRESH fresh input, CACHED cached input,
-OUTPUT output. Est. cost: COST. MCP: CALLS calls, ERRORS errors.`
+The skill reports: `Tokens: TOTAL / input: FRESH fresh, CACHED cached / output OUTPUT /
+est. cost: COST / MCP: CALLS calls, ERRORS errors.`
 Estimated costs are rounded to two decimal places (for example, `$0.50`).
 Only actionable high-usage warnings are appended. Normal/insufficient-history
 statuses and routine scope/billing disclaimers are omitted. Partial or unavailable

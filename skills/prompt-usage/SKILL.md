@@ -156,7 +156,7 @@ do not claim a final measurement was obtained while no tool could run.
 
 Use this exact compact structure, substituting the returned values:
 
-> Tokens: TOTAL tokens — FRESH fresh input, CACHED cached input, OUTPUT output. Est. cost: COST. MCP: CALLS calls, ERRORS errors.
+> Tokens: TOTAL / input: FRESH fresh, CACHED cached / output OUTPUT / est. cost: COST / MCP: CALLS calls, ERRORS errors.
 
 Use thousands separators for token counts. Round the estimated dollar cost to
 the nearest cent and always display exactly two decimal places (for example,
@@ -171,8 +171,8 @@ warning entirely for normal usage, insufficient history, uncertain usage or an
 unevaluated comparison; do not imply those states mean consumption is normal.
 
 Keep cost uncertainty in the cost field rather than a routine warning:
-use `Est. cost: $X (partial; N unpriced steps).` for partial pricing and
-`Est. cost: unavailable.` for an entirely unpriced result. Never render unknown
+use `est. cost: $X (partial; N unpriced steps)` for partial pricing and
+`est. cost: unavailable` for an entirely unpriced result. Never render unknown
 cost as zero. Request failures still use the error footer below.
 
 Interpretation for the agent, not additional footer text: values cover newly
