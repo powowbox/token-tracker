@@ -13,7 +13,7 @@ Nothing leaves your machine.
 
 This release includes the Codex accounting repair, partial-cost dashboard, 
 
-### ADD SKILL allowing the agent to give the token consomtion after each propt
+### ADD SKILL allowing the agent to give the token consumption after each prompt
 
 A portable [prompt-usage skill](skills/prompt-usage/SKILL.md) for snapshot-based usage reporting, with stop/resume controls and non-blocking error handling.
 
