@@ -199,3 +199,10 @@ footer { padding: 14px 20px; color: var(--text-mute); border-top: 1px solid var(
   .hero-charts { grid-template-columns: 1fr; }
   .hero-chart { height: 280px; }
 }
+
+/* Keep pricing coverage readable at every screen size. */
+.card .sub { white-space: normal; overflow: visible; }
+@media (max-width: 900px) {
+  .cards--locked { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card .label { white-space: normal; overflow: visible; }
+}

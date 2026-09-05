@@ -17,7 +17,7 @@ def run(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
     try:
         msgs = conn.execute(
             """SELECT id, tool, model, input_tokens, output_tokens, cache_read,
-                      cache_write_5m, cache_write_1h, reasoning_tokens
+                      cache_write_5m, cache_write_1h, reasoning_tokens, cache_write_input_tokens, usage_status
                FROM messages""").fetchall()
         for m in msgs:
             # output_tokens already includes reasoning/thinking for both vendors.
@@ -28,8 +28,11 @@ def run(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
                 cache_read=m["cache_read"],
                 cache_write_5m=m["cache_write_5m"],
                 cache_write_1h=m["cache_write_1h"],
+                cache_write_input_tokens=m["cache_write_input_tokens"],
             )
-            conn.execute("UPDATE messages SET est_cost_usd=? WHERE id=?", (c, m["id"]))
+            if m["tool"] == "codex" and ("unverified" in m["usage_status"] or "partial_fields" in m["usage_status"] or m["usage_status"].startswith("cumulative_corrected")):
+                c = None
+            conn.execute("UPDATE messages SET est_cost_usd=?, cost_status=? WHERE id=?", (c, "api_equivalent" if c is not None else "unpriced", m["id"]))
 
         mcp = conn.execute("SELECT id, result_chars FROM mcp_calls").fetchall()
         for row in mcp:
@@ -49,7 +52,7 @@ def run(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
                      cache_read       = COALESCE((SELECT SUM(cache_read)       FROM messages WHERE session_id=?), 0),
                      cache_write      = COALESCE((SELECT SUM(cache_write_5m + cache_write_1h) FROM messages WHERE session_id=?), 0),
                      reasoning_tokens = COALESCE((SELECT SUM(reasoning_tokens) FROM messages WHERE session_id=?), 0),
-                     est_cost_usd     = COALESCE((SELECT SUM(est_cost_usd)     FROM messages WHERE session_id=?), 0)
+                     est_cost_usd     = (SELECT CASE WHEN COUNT(*)=COUNT(est_cost_usd) THEN COALESCE(SUM(est_cost_usd),0) END FROM messages WHERE session_id=?)
                    WHERE id=?""",
                 (sid, sid, sid, sid, sid, sid, sid, sid),
             )

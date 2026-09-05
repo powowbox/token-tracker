@@ -1,28 +1,178 @@
 {
-  "_comment": "USD per 1M tokens. Source: https://platform.claude.com/docs/en/about-claude/pricing (and OpenAI/Codex pricing). Edit freely; cost is recomputed on each ingest. cache_write_5m / cache_write_1h are the prompt-caching write rates; cache_read is the cache-hit rate.",
+  "_comment": "USD per 1M tokens. Current standard API-equivalent estimates, not historical billing or subscription quota. Unknown models are unpriced. Sources and verification dates are recorded per Codex model.",
   "claude": {
-    "claude-opus-4-7":   {"input":  5.00, "output": 25.00, "cache_read": 0.50, "cache_write_5m":  6.25, "cache_write_1h": 10.00},
-    "claude-opus-4-6":   {"input":  5.00, "output": 25.00, "cache_read": 0.50, "cache_write_5m":  6.25, "cache_write_1h": 10.00},
-    "claude-opus-4-5":   {"input":  5.00, "output": 25.00, "cache_read": 0.50, "cache_write_5m":  6.25, "cache_write_1h": 10.00},
-    "claude-opus-4-1":   {"input": 15.00, "output": 75.00, "cache_read": 1.50, "cache_write_5m": 18.75, "cache_write_1h": 30.00},
-    "claude-opus-4":     {"input": 15.00, "output": 75.00, "cache_read": 1.50, "cache_write_5m": 18.75, "cache_write_1h": 30.00},
-    "claude-sonnet-4-6": {"input":  3.00, "output": 15.00, "cache_read": 0.30, "cache_write_5m":  3.75, "cache_write_1h":  6.00},
-    "claude-sonnet-4-5": {"input":  3.00, "output": 15.00, "cache_read": 0.30, "cache_write_5m":  3.75, "cache_write_1h":  6.00},
-    "claude-sonnet-4":   {"input":  3.00, "output": 15.00, "cache_read": 0.30, "cache_write_5m":  3.75, "cache_write_1h":  6.00},
-    "claude-haiku-4-5":  {"input":  1.00, "output":  5.00, "cache_read": 0.10, "cache_write_5m":  1.25, "cache_write_1h":  2.00},
-    "claude-haiku-3-5":  {"input":  0.80, "output":  4.00, "cache_read": 0.08, "cache_write_5m":  1.00, "cache_write_1h":  1.60},
-    "_default":          {"input":  3.00, "output": 15.00, "cache_read": 0.30, "cache_write_5m":  3.75, "cache_write_1h":  6.00}
+    "claude-opus-4-7": {
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10.0
+    },
+    "claude-opus-4-6": {
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10.0
+    },
+    "claude-opus-4-5": {
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10.0
+    },
+    "claude-opus-4-1": {
+      "input": 15.0,
+      "output": 75.0,
+      "cache_read": 1.5,
+      "cache_write_5m": 18.75,
+      "cache_write_1h": 30.0
+    },
+    "claude-opus-4": {
+      "input": 15.0,
+      "output": 75.0,
+      "cache_read": 1.5,
+      "cache_write_5m": 18.75,
+      "cache_write_1h": 30.0
+    },
+    "claude-sonnet-4-6": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6.0
+    },
+    "claude-sonnet-4-5": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6.0
+    },
+    "claude-sonnet-4": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6.0
+    },
+    "claude-haiku-4-5": {
+      "input": 1.0,
+      "output": 5.0,
+      "cache_read": 0.1,
+      "cache_write_5m": 1.25,
+      "cache_write_1h": 2.0
+    },
+    "claude-haiku-3-5": {
+      "input": 0.8,
+      "output": 4.0,
+      "cache_read": 0.08,
+      "cache_write_5m": 1.0,
+      "cache_write_1h": 1.6
+    },
+    "_default": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6.0
+    }
   },
   "codex": {
-    "gpt-5":             {"input":  1.25, "output": 10.00, "cache_read": 0.125},
-    "gpt-5-mini":        {"input":  0.25, "output":  2.00, "cache_read": 0.025},
-    "gpt-5-codex":       {"input":  1.25, "output": 10.00, "cache_read": 0.125},
-    "gpt-5.2":           {"input":  1.75, "output": 14.00, "cache_read": 0.175},
-    "gpt-5.2-codex":     {"input":  1.75, "output": 14.00, "cache_read": 0.175},
-    "gpt-5.3-codex":     {"input":  1.75, "output": 14.00, "cache_read": 0.175},
-    "gpt-5.4":           {"input":  2.50, "output": 15.00, "cache_read": 0.250},
-    "gpt-5.4-mini":      {"input":  0.75, "output":  4.50, "cache_read": 0.075},
-    "gpt-5.5":           {"input":  5.00, "output": 30.00, "cache_read": 0.500},
-    "_default":          {"input":  1.25, "output": 10.00, "cache_read": 0.125}
+    "gpt-5": {
+      "input": 1.25,
+      "output": 10.0,
+      "cache_read": 0.125
+    },
+    "gpt-5-mini": {
+      "input": 0.25,
+      "output": 2.0,
+      "cache_read": 0.025
+    },
+    "gpt-5-codex": {
+      "input": 1.25,
+      "output": 10.0,
+      "cache_read": 0.125
+    },
+    "gpt-5.2": {
+      "input": 1.75,
+      "output": 14.0,
+      "cache_read": 0.175
+    },
+    "gpt-5.2-codex": {
+      "input": 1.75,
+      "output": 14.0,
+      "cache_read": 0.175
+    },
+    "gpt-5.3-codex": {
+      "input": 1.75,
+      "output": 14.0,
+      "cache_read": 0.175
+    },
+    "gpt-5.4": {
+      "input": 2.5,
+      "output": 15.0,
+      "cache_read": 0.25
+    },
+    "gpt-5.4-mini": {
+      "input": 0.75,
+      "output": 4.5,
+      "cache_read": 0.075,
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.4-mini",
+      "verified_at": "2026-09-05"
+    },
+    "gpt-5.5": {
+      "input": 5.0,
+      "output": 30.0,
+      "cache_read": 0.5
+    },
+    "_default": {
+      "input": 1.25,
+      "output": 10.0,
+      "cache_read": 0.125
+    },
+    "gpt-5.6-sol": {
+      "input": 4,
+      "output": 20,
+      "cache_read": 0.4,
+      "cache_write": 5.0,
+      "long_context_threshold": 272000,
+      "long_input_multiplier": 2,
+      "long_output_multiplier": 1.5,
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+      "verified_at": "2026-09-05"
+    },
+    "gpt-5.6-luna": {
+      "input": 0.2,
+      "output": 1.2,
+      "cache_read": 0.02,
+      "cache_write": 0.25,
+      "long_context_threshold": 272000,
+      "long_input_multiplier": 2,
+      "long_output_multiplier": 1.5,
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+      "verified_at": "2026-09-05"
+    },
+    "gpt-6-astra": {
+      "input": 10,
+      "output": 50,
+      "cache_read": 1,
+      "cache_write": 12.5,
+      "long_context_threshold": 272000,
+      "long_input_multiplier": 2,
+      "long_output_multiplier": 1.5,
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      "verified_at": "2026-09-05"
+    }
+  },
+  "aliases": {
+    "codex": {
+      "gpt-5.6": "gpt-5.6-sol",
+      "gpt-5.4-mini-2026-03-17": "gpt-5.4-mini"
+    },
+    "claude": {
+      "claude-sonnet-4-5-20250929": "claude-sonnet-4-5"
+    }
   }
 }

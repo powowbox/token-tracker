@@ -1,5 +1,6 @@
 """SQLite schema + small helpers."""
 from __future__ import annotations
+from contextlib import closing
 
 import sqlite3
 from pathlib import Path
@@ -11,6 +12,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_uuid    TEXT NOT NULL,
     cwd             TEXT,
     model           TEXT,                    -- last model observed in session
+    originator      TEXT,
+    source          TEXT,
+    session_kind    TEXT NOT NULL DEFAULT 'unknown',
+    reasoning_effort TEXT,
     entrypoint      TEXT,                    -- 'cli' (interactive), 'sdk-cli', 'codex', ... — how the run was launched
     started_at      TEXT,
     ended_at        TEXT,
@@ -20,7 +25,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     cache_read      INTEGER NOT NULL DEFAULT 0,
     cache_write     INTEGER NOT NULL DEFAULT 0,
     reasoning_tokens INTEGER NOT NULL DEFAULT 0,
-    est_cost_usd    REAL NOT NULL DEFAULT 0
+    est_cost_usd    REAL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -35,9 +40,13 @@ CREATE TABLE IF NOT EXISTS messages (
     cache_write_5m  INTEGER NOT NULL DEFAULT 0,
     cache_write_1h  INTEGER NOT NULL DEFAULT 0,
     reasoning_tokens INTEGER NOT NULL DEFAULT 0,
-    est_cost_usd    REAL NOT NULL DEFAULT 0,
+    est_cost_usd    REAL,
     source_file     TEXT NOT NULL,
     source_line     INTEGER NOT NULL,
+    reasoning_effort TEXT,
+    usage_status    TEXT NOT NULL DEFAULT 'reported',
+    cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_status     TEXT NOT NULL DEFAULT 'unpriced',
     agent_type      TEXT,                    -- e.g. 'Explore', 'Plan' for sub-agents; NULL for the main session
     agent_desc      TEXT,                    -- per-invocation description from the meta.json sidecar
     agent_id        TEXT,                    -- per-invocation hash from the JSONL filename (the sub-agent "PID")
@@ -57,6 +66,9 @@ CREATE TABLE IF NOT EXISTS mcp_calls (
     server          TEXT NOT NULL,
     tool_name       TEXT NOT NULL,
     call_id         TEXT NOT NULL,           -- toolu_* or call_*
+    model           TEXT,
+    media_count     INTEGER NOT NULL DEFAULT 0,
+    completed       INTEGER NOT NULL DEFAULT 1,
     result_chars    INTEGER NOT NULL DEFAULT 0,
     est_result_tokens INTEGER NOT NULL DEFAULT 0,
     is_error        INTEGER NOT NULL DEFAULT 0,
@@ -91,9 +103,26 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "tokens.db"
 
 
+class KnownCost:
+    """NULL means some usage has no price; never silently total only priced rows."""
+    def __init__(self):
+        self.total = 0.0
+        self.unknown = False
+
+    def step(self, value):
+        if value is None:
+            self.unknown = True
+        else:
+            self.total += value
+
+    def finalize(self):
+        return None if self.unknown else self.total
+
+
 def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    conn.create_aggregate("known_cost", 1, KnownCost)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -101,6 +130,14 @@ def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 
 def init(db_path: Path | str = DEFAULT_DB_PATH) -> None:
+    # Existing legacy databases require the explicit offline rebuild procedure.
+    # Do not migrate them implicitly on server startup or ingestion.
+    path = Path(db_path)
+    if path.exists() and path.stat().st_size:
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as check, check:
+            columns = {r[1] for r in check.execute("PRAGMA table_info(messages)")}
+            if columns and "cost_status" not in columns:
+                raise RuntimeError("Legacy database: prepare and approve tracker.rebuild_codex before using the repaired tracker")
     conn = connect(db_path)
     try:
         conn.executescript(SCHEMA)

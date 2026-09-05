@@ -14,7 +14,7 @@ const fmt = {
     if (abs >= 1e3) return (x / 1e3).toFixed(1) + "K";
     return String(x);
   },
-  usd: (x) => x == null ? "—" : "$" + Number(x).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  usd: (x) => x == null ? "Unpriced" : "$" + Number(x).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
   bytes: (x) => {
     if (x == null) return "—";
     const units = ["B", "KB", "MB", "GB"];
@@ -177,28 +177,34 @@ function renderCards(totals) {
   const tokens_hit = totals.cache_hit || 0;
   const tokens_cw5 = totals.cache_write_5m || 0;
   const tokens_cw1 = totals.cache_write_1h || 0;
-  const cost = totals.cost_usd || 0;
+  const coverage = totals.pricing_coverage || {};
+  const unpriced = coverage.unpriced_messages || 0;
+  const partial = unpriced > 0 && coverage.priced_messages > 0;
+  const cost = partial ? coverage.known_api_equivalent_usd : totals.cost_usd;
+  const costNote = partial
+    ? `Partial estimate · ${fmt.n(unpriced)} unpriced steps excluded`
+    : unpriced ? `${fmt.n(unpriced)} unpriced steps · no verified price` : "All steps priced · not billing/quota";
   const ah = totals.active_hours || 0;
-  const cph = totals.cost_per_hour || 0;
+  const cph = partial && ah > 0 ? cost / ah : totals.cost_per_hour;
   const freshTokens = tokens_in + tokens_out + tokens_cw5 + tokens_cw1;
   const allTokens = freshTokens + tokens_hit;
   const cacheShare = allTokens ? tokens_hit / allTokens : 0;
-  const cb = totals.cost_breakdown || {};
-  const cwTotal = (cb.cache_write_5m || 0) + (cb.cache_write_1h || 0);
+  const cb = (partial ? totals.known_cost_breakdown : totals.cost_breakdown) || {};
+  const cwTotal = cb.cache_write_5m == null || cb.cache_write_1h == null ? null : cb.cache_write_5m + cb.cache_write_1h;
   const pct = (v) => cost ? Math.round((v / cost) * 100) + "%" : "—";
   const overview = [
-    { label: "est cost", value: fmt.usd(cost), accent: true },
-    { label: "$ / active hour", value: fmt.usd(cph), accent: true, sub: "Σ session spans" },
+    { label: partial ? "Known API-equivalent cost" : "API-equivalent estimate", value: fmt.usd(cost), accent: true, sub: costNote },
+    { label: "$ / active hour", value: fmt.usd(cph), accent: true, sub: partial ? "Partial estimate · priced usage only" : "Σ session spans" },
     { label: "sessions", value: fmt.n(totals.sessions) },
     { label: "messages", value: fmt.n(totals.msgs) },
     { label: "active hours", value: ah < 1 ? ah.toFixed(2) : ah.toFixed(1) },
     { label: "cache share (tok)", value: Math.round(cacheShare * 100) + "%", sub: fmt.short(tokens_hit) + " hits" },
   ];
   const breakdown = [
-    { label: "cache read", value: fmt.usd(cb.cache_read), sub: pct(cb.cache_read || 0) + " of total" },
+    { label: "cache read", value: fmt.usd(cb.cache_read), sub: pct(cb.cache_read || 0) + (partial ? " of known cost" : " of total") },
     { label: "cache write", value: fmt.usd(cwTotal), sub: pct(cwTotal) + " · 5m+1h" },
     { label: "output", value: fmt.usd(cb.output), sub: pct(cb.output || 0) + " · incl reasoning" },
-    { label: "fresh input", value: fmt.usd(cb.input), sub: pct(cb.input || 0) + " of total" },
+    { label: "fresh input", value: fmt.usd(cb.input), sub: pct(cb.input || 0) + (partial ? " of known cost" : " of total") },
   ];
   const renderCard = (c) => `
     <div class="card ${c.accent ? "accent" : ""}" title="${c.label}: ${c.value}${c.sub ? " (" + c.sub + ")" : ""}">

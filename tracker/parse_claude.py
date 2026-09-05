@@ -37,6 +37,9 @@ class MessageRow:
     agent_type: str | None = None
     agent_desc: str | None = None
     agent_id: str | None = None
+    reasoning_effort: str | None = None
+    usage_status: str = "reported"
+    cache_write_input_tokens: int = 0
 
 
 @dataclass
@@ -51,6 +54,9 @@ class McpCallRow:
     is_error: int = 0
     source_file: str = ""
     source_line: int = 0
+    model: str | None = None
+    media_count: int = 0
+    completed: bool = True
 
 
 @dataclass
@@ -62,6 +68,10 @@ class SessionMeta:
     model: str | None
     started_at: str | None
     ended_at: str | None
+    originator: str | None = None
+    source: str | None = None
+    session_kind: str = "unknown"
+    reasoning_effort: str | None = None
     entrypoint: str | None = None  # 'cli' (interactive REPL), 'sdk-cli' (programmatic), …
 
 
@@ -70,6 +80,7 @@ class ParsedFile:
     session: SessionMeta
     messages: list[MessageRow] = field(default_factory=list)
     mcp_calls: list[McpCallRow] = field(default_factory=list)
+    diagnostics: dict[str, int] = field(default_factory=dict)
 
 
 def _mcp_parse_name(name: str) -> tuple[str, str] | None:
@@ -128,7 +139,7 @@ def _agent_meta(path: Path) -> tuple[str | None, str | None]:
     return m.get("agentType"), m.get("description")
 
 
-def parse_file(path: Path, *, start_offset: int = 0) -> tuple[ParsedFile, int]:
+def parse_file(path: Path, *, start_offset: int = 0, end_offset: int | None = None) -> tuple[ParsedFile, int]:
     """Parse from byte offset; returns (parsed, new_offset).
 
     new_offset is the byte position AFTER the last fully-parsed line. If a
@@ -169,7 +180,7 @@ def parse_file(path: Path, *, start_offset: int = 0) -> tuple[ParsedFile, int]:
                 head = g.read(start_offset)
                 line_no = head.count(b"\n")
 
-        buf = f.read()
+        buf = f.read() if end_offset is None else f.read(max(0, end_offset - start_offset))
 
     # Process complete lines only (one JSON per line). Split on b"\n"; any trailing
     # bytes without newline are a partial write — leave them for next run.
