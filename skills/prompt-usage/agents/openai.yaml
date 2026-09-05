@@ -1,0 +1,6 @@
+interface:
+  display_name: "Prompt Usage"
+  short_description: "Require start snapshots and end-of-prompt usage reports"
+  default_prompt: "Use $prompt-usage for every prompt: create a snapshot before task work and report its usage delta before the final answer."
+policy:
+  allow_implicit_invocation: true

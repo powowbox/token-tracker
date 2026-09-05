@@ -7,3 +7,25 @@ tokens.db-wal
 .DS_Store
 *.log
 .claude/
+
+# Persistent local usage checkpoints (private metadata)
+usage-snapshots.sqlite3*
+
+# Local databases, backups and reports may contain private usage/session metadata.
+*.db
+*.db-*
+*.db.*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.source-backup
+*.report.json
+*.jsonl
+
+# Local credentials/configuration must never be committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key

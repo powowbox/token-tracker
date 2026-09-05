@@ -48,9 +48,13 @@ def _put_state(conn: sqlite3.Connection, path: Path, offset: int, mtime: float, 
 
 def _upsert_session(conn: sqlite3.Connection, meta) -> None:
     conn.execute(
-        """INSERT INTO sessions(id, tool, session_uuid, cwd, model, entrypoint, started_at, ended_at)
-           VALUES(?,?,?,?,?,?,?,?)
+        """INSERT INTO sessions(id, tool, session_uuid, cwd, model, entrypoint, started_at, ended_at, originator, source, session_kind, reasoning_effort)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
+             originator = COALESCE(excluded.originator, sessions.originator),
+             source = COALESCE(excluded.source, sessions.source),
+             session_kind = excluded.session_kind,
+             reasoning_effort = COALESCE(excluded.reasoning_effort, sessions.reasoning_effort),
              cwd        = COALESCE(excluded.cwd, sessions.cwd),
              model      = COALESCE(excluded.model, sessions.model),
              entrypoint = COALESCE(excluded.entrypoint, sessions.entrypoint),
@@ -59,7 +63,8 @@ def _upsert_session(conn: sqlite3.Connection, meta) -> None:
              ended_at   = CASE WHEN sessions.ended_at IS NULL OR excluded.ended_at>sessions.ended_at
                                THEN excluded.ended_at ELSE sessions.ended_at END""",
         (meta.session_id, meta.tool, meta.session_uuid, meta.cwd, meta.model,
-         getattr(meta, "entrypoint", None), meta.started_at, meta.ended_at),
+         getattr(meta, "entrypoint", None), meta.started_at, meta.ended_at,
+         meta.originator, meta.source, meta.session_kind, meta.reasoning_effort),
     )
 
 
@@ -76,18 +81,22 @@ def _insert_messages(conn: sqlite3.Connection, rows) -> int:
             cache_read=r.cache_read,
             cache_write_5m=r.cache_write_5m,
             cache_write_1h=r.cache_write_1h,
+            cache_write_input_tokens=r.cache_write_input_tokens,
         )
+        if r.tool == "codex" and ("unverified" in r.usage_status or "partial_fields" in r.usage_status or r.usage_status.startswith("cumulative_corrected")):
+            cost = None  # Request boundaries or field completeness are uncertain.
         cur = conn.execute(
             """INSERT OR IGNORE INTO messages
                (session_id, tool, ts, model, input_tokens, output_tokens, cache_read,
                 cache_write_5m, cache_write_1h, reasoning_tokens, est_cost_usd,
-                source_file, source_line, agent_type, agent_desc, agent_id)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                source_file, source_line, agent_type, agent_desc, agent_id, reasoning_effort, usage_status, cache_write_input_tokens, cost_status)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (r.session_id, r.tool, r.ts, r.model, r.input_tokens, r.output_tokens,
              r.cache_read, r.cache_write_5m, r.cache_write_1h, r.reasoning_tokens, cost,
              r.source_file, r.source_line,
              getattr(r, "agent_type", None), getattr(r, "agent_desc", None),
-             getattr(r, "agent_id", None)),
+             getattr(r, "agent_id", None), r.reasoning_effort, r.usage_status, r.cache_write_input_tokens,
+             "api_equivalent" if cost is not None else "unpriced"),
         )
         added += cur.rowcount
         # Existing rows (already-ingested sub-agent files) won't be re-inserted; backfill the agent tags.
@@ -105,22 +114,24 @@ def _insert_messages(conn: sqlite3.Connection, rows) -> int:
 def _insert_mcp(conn: sqlite3.Connection, rows) -> int:
     added = 0
     for r in rows:
+        if not r.completed:
+            continue
         est_tokens = math.ceil(r.result_chars / EST_CHARS_PER_TOKEN) if r.result_chars else 0
         cur = conn.execute(
             """INSERT OR IGNORE INTO mcp_calls
                (session_id, tool, ts, server, tool_name, call_id, result_chars,
-                est_result_tokens, is_error, source_file, source_line)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                est_result_tokens, is_error, source_file, source_line, model, media_count, completed)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (r.session_id, r.tool, r.ts, r.server, r.tool_name, r.call_id,
-             r.result_chars, est_tokens, r.is_error, r.source_file, r.source_line),
+             r.result_chars, est_tokens, r.is_error, r.source_file, r.source_line, r.model, r.media_count, int(r.completed)),
         )
         added += cur.rowcount
         # If a later run learns the result size, update it (no-op if same row inserted now).
-        if cur.rowcount == 0 and r.result_chars > 0:
+        if cur.rowcount == 0 and r.completed:
             conn.execute(
-                """UPDATE mcp_calls SET result_chars=?, est_result_tokens=?, is_error=?
-                   WHERE source_file=? AND call_id=? AND result_chars=0""",
-                (r.result_chars, est_tokens, r.is_error, r.source_file, r.call_id),
+                """UPDATE mcp_calls SET result_chars=?, est_result_tokens=?, is_error=?, model=?, media_count=?, completed=?
+                   WHERE source_file=? AND call_id=?""",
+                (r.result_chars, est_tokens, r.is_error, r.model, r.media_count, int(r.completed), r.source_file, r.call_id),
             )
     return added
 
@@ -134,7 +145,7 @@ def _recompute_session(conn: sqlite3.Connection, session_id: str) -> None:
              cache_read       = COALESCE((SELECT SUM(cache_read)       FROM messages WHERE session_id=?), 0),
              cache_write      = COALESCE((SELECT SUM(cache_write_5m + cache_write_1h) FROM messages WHERE session_id=?), 0),
              reasoning_tokens = COALESCE((SELECT SUM(reasoning_tokens) FROM messages WHERE session_id=?), 0),
-             est_cost_usd     = COALESCE((SELECT SUM(est_cost_usd)     FROM messages WHERE session_id=?), 0)
+             est_cost_usd     = (SELECT CASE WHEN COUNT(*)=COUNT(est_cost_usd) THEN COALESCE(SUM(est_cost_usd),0) END FROM messages WHERE session_id=?)
            WHERE id=?""",
         (session_id, session_id, session_id, session_id, session_id, session_id, session_id, session_id),
     )

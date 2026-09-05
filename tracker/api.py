@@ -7,15 +7,17 @@ from collections import defaultdict
 from contextlib import contextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .db import DEFAULT_DB_PATH, connect, init
 from .ingest import run as run_ingest
 from .parse_claude import _tool_result_chars
-from .pricing import _lookup as _price_lookup, reload as _price_reload
+from .pricing import _lookup as _price_lookup, reload as _price_reload, cost_breakdown
 from .recompute_costs import run as run_recompute
+from .prompt_usage import index as prompt_index, warnings_for
+from .usage_snapshots import store as snapshot_store, SnapshotError
 
 # Effective max context window (tokens) per model. Used to display the per-turn
 # context size as a % of available context in the timeline view. These are the
@@ -111,7 +113,75 @@ def _startup():
 def health():
     with db() as c:
         n = c.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-    return {"ok": True, "messages": n, "db": str(DEFAULT_DB_PATH)}
+    return {"ok": True, "messages": n, "db": str(DEFAULT_DB_PATH),
+            "documentation_url": "/api/docs/operations"}
+
+
+@app.get("/api/docs/operations", response_class=PlainTextResponse)
+def operations_documentation():
+    """Serve only the README operations section, without opening the database."""
+    try:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        heading = "## Server operations\n"
+        start = readme.index(heading)
+        end = readme.find("\n## ", start + len(heading))
+        section = readme[start:end if end != -1 else None].strip() + "\n"
+    except (OSError, ValueError):
+        raise HTTPException(503, "Operations documentation unavailable; consult your Token Tracker README")
+    return PlainTextResponse(section, media_type="text/markdown")
+
+
+@app.post("/api/usage-snapshots", status_code=201)
+def create_usage_snapshot(session_id: str = Body(..., embed=True, min_length=1, max_length=200)):
+    try:
+        return snapshot_store.create(session_id)
+    except SnapshotError as e:
+        raise HTTPException(e.status, str(e)) from e
+
+
+@app.post("/api/usage-snapshots/{sid}/consumption")
+def snapshot_consumption(sid: str, days: int = Query(30, ge=1, le=365),
+                         min_samples: int = Query(20, ge=2, le=1000),
+                         percentile: float = Query(95, ge=50, le=99.9),
+                         multiplier: float = Query(2.0, ge=1, le=100)):
+    try:
+        return snapshot_store.consumption(sid, days=days, min_samples=min_samples,
+                                          percentile=percentile, multiplier=multiplier)
+    except SnapshotError as e:
+        raise HTTPException(e.status, str(e)) from e
+
+
+@app.get("/api/prompts")
+def prompts(session_id: str | None = None, project: str | None = None,
+            limit: int = Query(20, ge=1, le=100)):
+    """Discover turn identifiers without returning prompt text."""
+    reports, freshness = prompt_index.snapshot()
+    sid = session_id if not session_id or session_id.startswith("codex:") else "codex:" + session_id
+    selected = [r for r in reports if (not sid or r["session_id"] == sid)
+                and (not project or r["project"] == project)]
+    selected.sort(key=lambda r: r["started_at"] or "", reverse=True)
+    return {"prompts": selected[:limit], "matching_prompts": len(selected), "freshness": freshness}
+
+
+@app.get("/api/prompt-usage")
+def prompt_usage(session_id: str, turn_id: str | None = None,
+                 days: int = Query(30, ge=1, le=365),
+                 min_samples: int = Query(20, ge=2, le=1000),
+                 percentile: float = Query(95, ge=50, le=99.9),
+                 multiplier: float = Query(2.0, ge=1, le=100)):
+    """Latest logged consumption, not subscription billing or a final-response forecast."""
+    reports, freshness = prompt_index.snapshot()
+    sid = session_id if session_id.startswith("codex:") else "codex:" + session_id
+    selected = [r for r in reports if r["session_id"] == sid and (not turn_id or r["turn_id"] == turn_id)]
+    if not selected:
+        raise HTTPException(404, "No matching unambiguous logged turn; use /api/prompts and retry after logs flush")
+    target = max(enumerate(selected), key=lambda pair: (pair[1]["started_at"] or "", pair[0]))[1]
+    target["warning"] = warnings_for(target, reports, days=days, min_samples=min_samples,
+                                      percentile=percentile, multiplier=multiplier)
+    target["freshness"] = freshness
+    target["scope"] = "this_session_only; separate subagent and guardian sessions excluded"
+    target["measurement"] = "logged_usage_at_refresh; final response may not yet be recorded"
+    return target
 
 
 @app.get("/api/filters")
@@ -201,30 +271,32 @@ def stats(
                   COALESCE(SUM(m.cache_write_5m),0) AS cache_write_5m,
                   COALESCE(SUM(m.cache_write_1h),0) AS cache_write_1h,
                   COALESCE(SUM(m.reasoning_tokens),0) AS reasoning,
-                  COALESCE(SUM(m.est_cost_usd),0)   AS cost_usd
+                  known_cost(m.est_cost_usd)   AS cost_usd
                 {join}""", params).fetchone()
         totals = dict(totals_row)
+        if not totals["msgs"]:
+            totals["cost_usd"] = 0.0
 
-        # Cost breakdown by bucket. Group tokens by (tool, model), apply per-bucket rates,
-        # then sum. Lets the UI show "where the $ went" (cache reads almost always dominate).
-        by_tm = c.execute(
-            f"""SELECT m.tool, m.model,
-                       SUM(m.input_tokens)   AS in_tok,
-                       SUM(m.output_tokens)  AS out_tok,
-                       SUM(m.cache_read)     AS cr_tok,
-                       SUM(m.cache_write_5m) AS cw5_tok,
-                       SUM(m.cache_write_1h) AS cw1_tok
-                {join}
-                GROUP BY m.tool, m.model""", params).fetchall()
-        cb = {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write_5m": 0.0, "cache_write_1h": 0.0}
-        for r in by_tm:
-            p = _price_lookup(r["tool"], r["model"])
-            cb["input"]          += (r["in_tok"]  or 0) * p.get("input", 0) / 1_000_000
-            cb["output"]         += (r["out_tok"] or 0) * p.get("output", 0) / 1_000_000
-            cb["cache_read"]     += (r["cr_tok"]  or 0) * p.get("cache_read", 0) / 1_000_000
-            cb["cache_write_5m"] += (r["cw5_tok"] or 0) * p.get("cache_write_5m", 0) / 1_000_000
-            cb["cache_write_1h"] += (r["cw1_tok"] or 0) * p.get("cache_write_1h", 0) / 1_000_000
-        totals["cost_breakdown"] = {k: round(v, 4) for k, v in cb.items()}
+        # Compute per message: models can change, and long-context/write rates
+        # depend on the individual request, not the session's final model.
+        priced_rows = c.execute(f"SELECT m.* {join}", params).fetchall()
+        cb = {k: 0.0 for k in ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")}
+        unpriced = 0
+        known = 0.0
+        for r in priced_rows:
+            parts = cost_breakdown(r["tool"], r["model"], **{k: r[k] for k in (
+                "input_tokens", "output_tokens", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_input_tokens")})
+            if parts is None or r["cost_status"] == "unpriced":
+                unpriced += 1
+            else:
+                known += sum(parts.values())
+                for k, v in parts.items():
+                    cb[k] += v
+        totals["known_cost_breakdown"] = {k: round(v, 4) for k, v in cb.items()}
+        totals["cost_breakdown"] = {k: None if unpriced else round(v, 4) for k, v in cb.items()}
+        totals["pricing_coverage"] = {"priced_messages": len(priced_rows)-unpriced, "unpriced_messages": unpriced,
+                                      "known_api_equivalent_usd": round(known, 6)}
+        totals["cost_basis"] = "Current standard API-equivalent estimate; not billing or subscription quota"
 
         # Active hours: sum over sessions of (max(ts) - min(ts)) within the filter window.
         # This excludes pure idle gaps between sessions and gives a more meaningful rate.
@@ -238,7 +310,7 @@ def stats(
         active_seconds = active_row["active_sec"] or 0.0
         active_hours = active_seconds / 3600.0
         totals["active_hours"] = round(active_hours, 3)
-        totals["cost_per_hour"] = round(totals["cost_usd"] / active_hours, 4) if active_hours > 0 else 0.0
+        totals["cost_per_hour"] = round(totals["cost_usd"] / active_hours, 4) if active_hours > 0 and totals["cost_usd"] is not None else None
         tok_total = (totals["input_tokens"] + totals["output_tokens"]
                      + totals["cache_hit"] + totals["cache_write_5m"] + totals["cache_write_1h"])
         totals["tokens_per_hour"] = int(tok_total / active_hours) if active_hours > 0 else 0
@@ -251,7 +323,7 @@ def stats(
                        SUM(m.cache_read)    AS cache_hit,
                        SUM(m.cache_write_5m) AS cache_write_5m,
                        SUM(m.cache_write_1h) AS cache_write_1h,
-                       SUM(m.est_cost_usd)  AS cost_usd
+                       known_cost(m.est_cost_usd)  AS cost_usd
                 {join}
                 GROUP BY bucket
                 ORDER BY bucket""", params).fetchall()]
@@ -264,7 +336,7 @@ def stats(
                        SUM(m.cache_read) cache_hit,
                        SUM(m.cache_write_5m) cache_write_5m,
                        SUM(m.cache_write_1h) cache_write_1h,
-                       SUM(m.est_cost_usd) cost_usd
+                       known_cost(m.est_cost_usd) cost_usd
                 {join}
                 GROUP BY m.tool
                 ORDER BY cost_usd DESC""", params).fetchall()]
@@ -279,7 +351,7 @@ def stats(
                        SUM(m.cache_read) cache_hit,
                        SUM(m.cache_write_5m) cache_write_5m,
                        SUM(m.cache_write_1h) cache_write_1h,
-                       SUM(m.est_cost_usd) cost_usd
+                       known_cost(m.est_cost_usd) cost_usd
                 {join}
                 GROUP BY m.model, m.tool
                 ORDER BY cost_usd DESC""", params).fetchall()]
@@ -294,7 +366,7 @@ def stats(
                        SUM(m.cache_read) cache_hit,
                        SUM(m.cache_write_5m) cache_write_5m,
                        SUM(m.cache_write_1h) cache_write_1h,
-                       SUM(m.est_cost_usd) cost_usd
+                       known_cost(m.est_cost_usd) cost_usd
                 {join}
                 GROUP BY s.entrypoint
                 ORDER BY cost_usd DESC""", params).fetchall()]
@@ -312,7 +384,7 @@ def stats(
                        SUM(m.cache_read) cache_hit,
                        SUM(m.cache_write_5m) cache_write_5m,
                        SUM(m.cache_write_1h) cache_write_1h,
-                       SUM(m.est_cost_usd) cost_usd
+                       known_cost(m.est_cost_usd) cost_usd
                 {join}
                 GROUP BY m.agent_type, m.agent_id, m.agent_desc
                 ORDER BY cost_usd DESC""", params).fetchall()]
@@ -327,7 +399,7 @@ def stats(
                        SUM(m.cache_read) cache_hit,
                        SUM(m.cache_write_5m) cache_write_5m,
                        SUM(m.cache_write_1h) cache_write_1h,
-                       SUM(m.est_cost_usd) cost_usd
+                       known_cost(m.est_cost_usd) cost_usd
                 {join}
                 GROUP BY s.cwd
                 ORDER BY cost_usd DESC""", params).fetchall()]
@@ -336,7 +408,7 @@ def stats(
     for b in daily:
         tok = (b["input_tokens"] + b["output_tokens"] + b["cache_hit"]
                + b["cache_write_5m"] + b["cache_write_1h"])
-        b["cost_per_hour"] = round(b["cost_usd"] / bucket_hours, 4) if bucket_hours else 0.0
+        b["cost_per_hour"] = round(b["cost_usd"] / bucket_hours, 4) if bucket_hours and b["cost_usd"] is not None else None
         b["tokens_per_hour"] = int(tok / bucket_hours) if bucket_hours else 0
 
     return {
@@ -369,65 +441,8 @@ def breakdown_series(
     gran = granularity if granularity in _GRANULARITY else _pick_granularity(start, end)
 
     if group in {"server", "mcp_tool"}:
-        bucket = _GRANULARITY[gran].replace("m.ts", "mc.ts")
-        clauses = []
-        params: list = []
-        if tool:
-            clauses.append("mc.tool = ?"); params.append(tool)
-        if model:
-            clauses.append("EXISTS (SELECT 1 FROM messages mm WHERE mm.source_file=mc.source_file "
-                           "AND mm.source_line=mc.source_line AND mm.model = ?)")
-            params.append(model)
-        if agent == "main":
-            clauses.append("EXISTS (SELECT 1 FROM messages mm WHERE mm.source_file=mc.source_file "
-                           "AND mm.source_line=mc.source_line AND mm.agent_type IS NULL)")
-        elif agent:
-            clauses.append("EXISTS (SELECT 1 FROM messages mm WHERE mm.source_file=mc.source_file "
-                           "AND mm.source_line=mc.source_line AND mm.agent_type = ?)")
-            params.append(agent)
-        if entrypoint:
-            clauses.append("s.entrypoint = ?")
-            params.append(entrypoint)
-        if project:
-            clauses.append("s.cwd = ?"); params.append(project)
-        if start:
-            clauses.append("mc.ts >= ?"); params.append(start)
-        if end:
-            clauses.append("mc.ts <= ?"); params.append(end)
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        join = f"FROM mcp_calls mc JOIN sessions s ON s.id = mc.session_id{where}"
-
-        with db() as c:
-            rows = list(c.execute(
-                f"""SELECT {bucket} AS bucket,
-                           mc.server, mc.tool_name, mc.est_result_tokens AS tokens,
-                           s.tool AS tool, s.model AS model,
-                           (SELECT COUNT(*) FROM messages mm
-                            WHERE mm.session_id = mc.session_id AND mm.ts > mc.ts) AS subseq
-                    {join}
-                    ORDER BY bucket""", params))
-
-        from collections import defaultdict
-        totals = defaultdict(float)
-        labels = {}
-        by_bucket = defaultdict(lambda: defaultdict(float))
-        for r in rows:
-            key = r["server"] if group == "server" else f"{r['server']}\u001f{r['tool_name']}"
-            label = r["server"] if group == "server" else f"{r['server']} · {r['tool_name']}"
-            cost = _per_call_lifecycle_cost(r["tokens"] or 0, r["tool"], r["model"], r["subseq"] or 0)
-            totals[key] += cost
-            labels[key] = label
-            by_bucket[key][r["bucket"]] += cost
-
-        buckets = sorted({r["bucket"] for r in rows})
-        top_keys = [k for k, _ in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]]
-        series = [{
-            "key": key,
-            "label": labels[key],
-            "total_cost_usd": round(totals[key], 6),
-            "points": [{"bucket": b, "cost_usd": round(by_bucket[key].get(b, 0.0), 6)} for b in buckets],
-        } for key in top_keys]
-        return {"granularity": gran, "buckets": buckets, "series": series}
+        return {"granularity": gran, "buckets": [], "series": [],
+                "cost_basis": "Per-tool billing unavailable; see estimated text size and call counts"}
 
     group_exprs = {
         "tool": ("m.tool", "m.tool"),
@@ -453,7 +468,7 @@ def breakdown_series(
         top = [dict(r) for r in c.execute(
             f"""SELECT {key_expr} AS key,
                        {label_expr} AS label,
-                       SUM(m.est_cost_usd) AS cost_usd
+                       known_cost(m.est_cost_usd) AS cost_usd
                 {join}
                 GROUP BY key, label
                 ORDER BY cost_usd DESC
@@ -469,7 +484,7 @@ def breakdown_series(
         rows = [dict(r) for r in c.execute(
             f"""SELECT {bucket} AS bucket,
                        {key_expr} AS key,
-                       SUM(m.est_cost_usd) AS cost_usd
+                       known_cost(m.est_cost_usd) AS cost_usd
                 {join}
                   {"AND" if where else "WHERE"} {key_expr} IN ({placeholders})
                 GROUP BY bucket, key
@@ -480,15 +495,15 @@ def breakdown_series(
     buckets = sorted({r["bucket"] for r in rows})
     costs_by_key = {k: {b: 0.0 for b in buckets} for k in keys}
     for r in rows:
-        costs_by_key[r["key"]][r["bucket"]] = r["cost_usd"] or 0.0
+        costs_by_key[r["key"]][r["bucket"]] = r["cost_usd"]
 
     labels = {r["key"]: r["label"] for r in top}
-    totals = {r["key"]: r["cost_usd"] or 0.0 for r in top}
+    totals = {r["key"]: r["cost_usd"] for r in top}
     series = [{
         "key": key,
         "label": labels[key],
-        "total_cost_usd": round(totals[key], 6),
-        "points": [{"bucket": b, "cost_usd": round(costs_by_key[key].get(b, 0.0), 6)} for b in buckets],
+        "total_cost_usd": _round_known(totals[key], 6),
+        "points": [{"bucket": b, "cost_usd": _round_known(costs_by_key[key].get(b, 0.0), 6)} for b in buckets],
     } for key in keys]
     return {"granularity": gran, "buckets": buckets, "series": series}
 
@@ -528,7 +543,7 @@ def sessions(
                   COALESCE(SUM(m.cache_read),0) AS cache_read,
                   COALESCE(SUM(m.cache_write_5m + m.cache_write_1h),0) AS cache_write,
                   COALESCE(SUM(m.reasoning_tokens),0) AS reasoning_tokens,
-                  COALESCE(SUM(m.est_cost_usd),0) AS est_cost_usd
+                  known_cost(m.est_cost_usd) AS est_cost_usd
                 FROM messages m JOIN sessions s ON s.id = m.session_id
                 {where}
                 GROUP BY s.id
@@ -571,7 +586,7 @@ def session_detail(
                   COALESCE(SUM(m.cache_read),0) AS cache_read,
                   COALESCE(SUM(m.cache_write_5m + m.cache_write_1h),0) AS cache_write,
                   COALESCE(SUM(m.reasoning_tokens),0) AS reasoning_tokens,
-                  COALESCE(SUM(m.est_cost_usd),0) AS est_cost_usd
+                  known_cost(m.est_cost_usd) AS est_cost_usd
                 FROM sessions s LEFT JOIN messages m ON s.id = m.session_id
                 {where}
                 GROUP BY s.id""",
@@ -580,13 +595,13 @@ def session_detail(
         msgs = [dict(r) for r in c.execute(
             f"""SELECT m.ts, m.model, m.input_tokens, m.output_tokens, m.cache_read,
                       m.cache_write_5m, m.cache_write_1h, m.reasoning_tokens, m.est_cost_usd,
-                      m.agent_type, m.agent_desc, m.agent_id
+                      m.agent_type, m.agent_desc, m.agent_id, m.reasoning_effort, m.usage_status, m.cost_status, m.cache_write_input_tokens
                 FROM messages m JOIN sessions s ON s.id = m.session_id
                 {where}
                 ORDER BY m.ts""",
             params).fetchall()]
         mcp = [dict(r) for r in c.execute(
-            """SELECT ts, server, tool_name, result_chars, est_result_tokens, is_error
+            """SELECT ts, server, tool_name, result_chars, est_result_tokens, is_error, model, media_count
                FROM mcp_calls
                WHERE session_id=?
                  AND (? IS NULL OR ts >= ?)
@@ -611,22 +626,14 @@ def session_detail(
     return {"session": session, "messages": msgs, "mcp_calls": mcp}
 
 
-def _per_call_lifecycle_cost(tokens: int, tool: str, model: str | None, subsequent_msgs: int) -> float:
-    """Lifecycle cost of an MCP result that enters context:
-    - Claude: cache_write_1h once (most-common TTL in Claude Code) + cache_read × subsequent turns.
-    - Codex:  full input rate once (no cache writes) + cache_read × subsequent turns
-              (OpenAI's auto-cache only activates after the first send).
-    """
-    if not tokens:
-        return 0.0
-    p = _price_lookup(tool, model)
-    cache_read = p.get("cache_read", 0)
-    if tool == "claude":
-        first = p.get("cache_write_1h") or p.get("cache_write_5m") or p.get("input", 0)
-    else:
-        first = p.get("input", 0)
-    cost = tokens * (first + cache_read * subsequent_msgs) / 1_000_000
-    return cost
+def _round_known(value, digits):
+    return round(value, digits) if value is not None else None
+
+
+def _per_call_lifecycle_cost(tokens, tool, model, subsequent_msgs):
+    # Text-size estimates are not billed token attribution. The old formula also
+    # incorrectly applied a session's last model to every replay of every result.
+    return None
 
 
 @app.get("/api/mcp")
@@ -639,25 +646,24 @@ def mcp(
     agent: str | None = Query(None),
     entrypoint: str | None = Query(None),
 ):
-    """MCP usage breakdown: by server, by server+tool_name. Cost attribution explained
-    inline: result tokens × cache_read rate of the session's model (since MCP results
-    become cached input on subsequent turns)."""
+    """MCP execution counts/errors and estimated returned text size, not billing."""
     clauses = []
     params: list = []
     if tool:
         clauses.append("mc.tool = ?"); params.append(tool)
     if model:
         # An MCP call is issued by the assistant message at the same source_file/source_line.
-        clauses.append("EXISTS (SELECT 1 FROM messages mm WHERE mm.source_file=mc.source_file "
-                       "AND mm.source_line=mc.source_line AND mm.model = ?)")
+        clauses.append("mc.model = ?")
         params.append(model)
     if agent == "main":
-        clauses.append("EXISTS (SELECT 1 FROM messages mm WHERE mm.source_file=mc.source_file "
-                       "AND mm.source_line=mc.source_line AND mm.agent_type IS NULL)")
+        clauses.append("((mc.tool='codex' AND s.session_kind='user') OR (mc.tool!='codex' AND EXISTS "
+                       "(SELECT 1 FROM messages mm WHERE mm.source_file=mc.source_file "
+                       "AND mm.source_line=mc.source_line AND mm.agent_type IS NULL)))")
     elif agent:
-        clauses.append("EXISTS (SELECT 1 FROM messages mm WHERE mm.source_file=mc.source_file "
-                       "AND mm.source_line=mc.source_line AND mm.agent_type = ?)")
-        params.append(agent)
+        clauses.append("((mc.tool='codex' AND s.session_kind=?) OR (mc.tool!='codex' AND EXISTS "
+                       "(SELECT 1 FROM messages mm WHERE mm.source_file=mc.source_file "
+                       "AND mm.source_line=mc.source_line AND mm.agent_type = ?)))")
+        params.extend([agent, agent])
     if entrypoint:
         clauses.append("s.entrypoint = ?")
         params.append(entrypoint)
@@ -671,24 +677,23 @@ def mcp(
     join = f"FROM mcp_calls mc JOIN sessions s ON s.id = mc.session_id{where}"
 
     with db() as c:
-        # Per-call rows with the session's model + count of subsequent messages in the
-        # same session (those are the turns that will re-read the cached MCP result).
+        # Preserve the model at each call; later message counts are context only.
         call_rows = list(c.execute(
             f"""SELECT mc.server, mc.tool_name, mc.est_result_tokens AS tokens,
                        mc.result_chars, mc.is_error,
-                       s.tool AS tool, s.model AS model,
+                       mc.tool AS tool, mc.model AS model,
                        (SELECT COUNT(*) FROM messages mm
                         WHERE mm.session_id = mc.session_id AND mm.ts > mc.ts) AS subseq
                 {join}""", params))
 
         # Distinct-session-cost aggregations remain useful as a secondary signal.
         session_cost_by_server = {r["server"]: r["session_cost"] for r in c.execute(
-            f"""SELECT server, SUM(est_cost_usd) AS session_cost FROM (
+            f"""SELECT server, known_cost(est_cost_usd) AS session_cost FROM (
                   SELECT DISTINCT mc.server, s.id, s.est_cost_usd
                   {join}
                 ) GROUP BY server""", params).fetchall()}
         session_cost_by_tool = {(r["server"], r["tool_name"]): r["session_cost"] for r in c.execute(
-            f"""SELECT server, tool_name, SUM(est_cost_usd) AS session_cost FROM (
+            f"""SELECT server, tool_name, known_cost(est_cost_usd) AS session_cost FROM (
                   SELECT DISTINCT mc.server, mc.tool_name, s.id, s.est_cost_usd
                   {join}
                 ) GROUP BY server, tool_name""", params).fetchall()}
@@ -707,7 +712,7 @@ def mcp(
             acc["tokens"] += tokens
             acc["chars"] += r["result_chars"] or 0
             acc["errors"] += r["is_error"] or 0
-            acc["cost"] += cost
+            acc["cost"] = None
             acc["lifetime_reads"] += r["subseq"] or 0
 
     by_server = [{
@@ -718,10 +723,10 @@ def mcp(
         "est_tokens": v["tokens"],
         "avg_lifetime_reads": round(v["lifetime_reads"] / v["calls"], 1) if v["calls"] else 0,
         "errors": v["errors"],
-        "est_cost_usd": round(v["cost"], 4),
-        "session_cost_usd": round(session_cost_by_server.get(server, 0) or 0, 2),
+        "est_cost_usd": None if v["cost"] is None else round(v["cost"], 4),
+        "session_cost_usd": _round_known(session_cost_by_server.get(server), 2),
     } for server, v in by_server_acc.items()]
-    by_server.sort(key=lambda r: r["est_cost_usd"], reverse=True)
+    by_server.sort(key=lambda r: r["calls"], reverse=True)
 
     by_tool_name = [{
         "server": server,
@@ -731,12 +736,12 @@ def mcp(
         "est_tokens": v["tokens"],
         "avg_lifetime_reads": round(v["lifetime_reads"] / v["calls"], 1) if v["calls"] else 0,
         "errors": v["errors"],
-        "est_cost_usd": round(v["cost"], 4),
-        "session_cost_usd": round(session_cost_by_tool.get((server, tool_name), 0) or 0, 2),
+        "est_cost_usd": None if v["cost"] is None else round(v["cost"], 4),
+        "session_cost_usd": _round_known(session_cost_by_tool.get((server, tool_name)), 2),
     } for (server, tool_name), v in by_tool_acc.items()]
-    by_tool_name.sort(key=lambda r: r["est_cost_usd"], reverse=True)
+    by_tool_name.sort(key=lambda r: r["calls"], reverse=True)
 
-    return {"by_server": by_server, "by_tool_name": by_tool_name}
+    return {"by_server": by_server, "by_tool_name": by_tool_name, "token_basis": "Estimated returned text characters / 4; media excluded; not billed usage", "cost_basis": "Per-tool billing unavailable"}
 
 
 @app.get("/api/mcp/server/{server}")
