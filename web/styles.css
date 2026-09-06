@@ -6,7 +6,7 @@
   --border-strong: #3a3f49;
   --text: #e6e8ec;
   --text-dim: #9aa1ad;
-  --text-mute: #6c7280;
+  --text-mute: #8b919d;
   --accent: #7cc4ff;
   --accent-2: #ffd479;
   --warn: #ff7a7a;
@@ -196,7 +196,7 @@ footer { padding: 14px 20px; color: var(--text-mute); border-top: 1px solid var(
 
 @media (max-width: 900px) {
   .grid-2 { grid-template-columns: 1fr; }
-  .hero-charts { grid-template-columns: 1fr; }
+  .hero-charts { grid-template-columns: minmax(0, 1fr); }
   .hero-chart { height: 280px; }
 }
 
@@ -205,4 +205,69 @@ footer { padding: 14px 20px; color: var(--text-mute); border-top: 1px solid var(
 @media (max-width: 900px) {
   .cards--locked { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .card .label { white-space: normal; overflow: visible; }
+}
+
+/* Discussion leaderboard uses the dashboard palette, with wrapping titles. */
+.discussions-panel h2 { margin: 0; }
+.discussion-note, .discussion-meta { color: var(--text-dim); font-size: 12px; overflow-wrap: anywhere; }
+.discussion-meta { display: block; margin-top: 5px; }
+.discussion-warning { color: var(--accent-2); display: block; font-size: 12px; }
+.discussion-table { table-layout: fixed; }
+.discussion-table th:first-child { width: 6%; }
+.discussion-table th:nth-child(2) { width: 40%; }
+.discussion-table td, .discussion-table th { white-space: normal; overflow-wrap: anywhere; }
+.discussion-table td { padding-top: 12px; padding-bottom: 12px; }
+.discussion-link { background: none; border: none; color: var(--accent); font: inherit; text-align: left; cursor: pointer; padding: 0; overflow-wrap: anywhere; }
+.discussion-link:hover { text-decoration: underline; }
+.discussion-link:focus-visible, .discussions-panel button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.discussion-pages { display: flex; gap: 14px; align-items: center; justify-content: flex-end; margin-top: 14px; }
+#discussion-dialog { color: var(--text); background: var(--panel); border: 1px solid var(--border-strong); padding: 0; width: min(1100px, calc(100% - 24px)); max-height: 90vh; }
+#discussion-dialog::backdrop { background: #000a; }
+#discussion-dialog .modal-head { gap: 16px; }
+#dd-title { overflow-wrap: anywhere; }
+#dd-content { padding: 18px; }
+.discussion-scroll { overflow-x: auto; }
+.discussion-scroll td:first-child { white-space: normal; min-width: 180px; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .discussions-panel { padding: 16px 12px; }
+  .discussions-panel .row-controls { align-items: stretch; }
+  .discussions-panel h2 { width: 100%; }
+  .discussions-panel label { flex: 1 1 140px; }
+  .discussion-table, .discussion-table tbody, .discussion-table tr, .discussion-table td { display: block; width: 100%; }
+  .discussion-table thead { display: none; }
+  .discussion-table tr { padding: 10px 12px; border-bottom: 1px solid var(--border-strong); }
+  .discussion-table td { border: 0; padding: 5px 0; }
+  .discussion-table td[data-label] { display: flex; justify-content: space-between; gap: 12px; }
+  .discussion-table td[data-label]::before { content: attr(data-label); color: var(--text-dim); text-align: left; }
+  .discussion-pages { justify-content: space-between; }
+}
+
+/* Keep existing dashboard sections from widening the mobile leaderboard. */
+.card-group-label, .card .label, .card .sub { font-size: 11px; }
+.breakdown-table-scroll { overflow-x: auto; }
+@media (max-width: 700px) {
+  header, .actions { flex-wrap: wrap; gap: 8px; }
+}
+
+.prompt-preview-slot { min-height: 2.9em; }
+.prompt-preview { color: var(--text-dim); background: none; border: 0; padding: 0; font: inherit; text-align: left; cursor: pointer; width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.prompt-preview:hover { color: var(--text); }
+.prompt-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.first-prompt-popup { position: fixed; z-index: 200; width: min(640px, calc(100vw - 24px)); max-height: min(420px, calc(100dvh - 24px)); padding: 12px; color: var(--text); background: var(--panel-2); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px #0008; display: flex; flex-direction: column; gap: 10px; }
+.first-prompt-popup[hidden] { display: none; }
+.prompt-popup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; }
+.prompt-popup-text { white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; min-height: 0; font-size: 13px; line-height: 1.5; }
+.prompt-popup-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.discussion-sort { font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; border: 0; background: none; cursor: pointer; padding: 5px 0; text-align: inherit; width: 100%; }
+.discussion-sort:hover, .discussion-table th[aria-sort="ascending"], .discussion-table th[aria-sort="descending"] { color: var(--accent); }
+.discussion-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+#d-search { display: block; width: 100%; max-width: 100%; margin-top: 4px; padding: 6px 8px; font: 12px ui-monospace, monospace; letter-spacing: normal; text-transform: none; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); }
+#d-search::placeholder { color: var(--text-dim); opacity: 1; }
+#d-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 700px) {
+  .discussion-table thead { display: block; }
+  .discussion-table thead th { display: none; }
+  .discussion-table thead .discussion-title-header { display: block; width: 100%; position: static; padding: 0; border: 0; background: transparent; }
 }

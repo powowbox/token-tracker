@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=ctx5">
+  <link rel="stylesheet" href="/static/styles.css?v=prompt-search5">
 </head>
 <body>
   <header>
@@ -61,6 +61,26 @@
     <div class="cards cards--locked" id="cards-breakdown"></div>
   </section>
 
+  <section class="panel discussions-panel" aria-labelledby="discussions-title">
+    <div class="row-controls">
+      <h2 id="discussions-title">Top discussions by usage</h2>
+      <label>sort by <select id="d-sort"><option value="rank">rank (total tokens)</option><option value="tokens">total tokens</option><option value="cost">known estimated cost</option><option value="fresh_input">fresh input</option><option value="output">output</option><option value="title">discussion title</option><option value="activity">last activity</option><option value="subagents">subagents</option></select></label>
+      <label>order <select id="d-direction"><option value="desc">descending</option><option value="asc" selected>ascending</option></select></label>
+      <label>scope <select id="d-children"><option value="true">include subagents</option><option value="false">main only</option></select></label>
+      <label>pricing <select id="d-pricing"><option value="">all</option><option value="complete">complete</option><option value="partial">partial</option><option value="unavailable">unavailable</option></select></label>
+      <label>view <select id="d-view"><option value="discussions">discussions</option><option value="unattached">unattached agents</option></select></label>
+    </div>
+    <p class="discussion-note">Rank is based on total tokens and stays unchanged when sorting. Lifetime totals for discussions matching the filters above. Date filters select activity; they do not shorten the totals. Costs are API estimates.</p>
+    <p id="d-freshness" class="discussion-note"></p>
+    <div id="d-content" aria-live="polite">Loading discussions…</div>
+    <div class="discussion-pages"><button class="btn" id="d-prev" disabled>previous</button><span id="d-page" aria-live="polite"></span><button class="btn" id="d-next" disabled>next</button></div>
+  </section>
+
+  <dialog id="discussion-dialog" aria-labelledby="dd-title">
+    <div class="modal-head"><h3 id="dd-title">Discussion</h3><button class="btn" id="dd-close">close</button></div>
+    <div id="dd-content"></div>
+  </dialog>
+
   <section class="panel">
     <div class="row-controls">
       <h2 style="margin: 0">usage trend</h2>
@@ -100,7 +120,7 @@
       <button id="copy-breakdown" class="btn" style="margin-left:auto" title="copy table as TSV (paste into Sheets/Excel/Slack)">copy</button>
     </div>
     <div class="chart-wrap breakdown-chart"><canvas id="chart-breakdown"></canvas></div>
-    <table id="t-breakdown"></table>
+    <div class="breakdown-table-scroll"><table id="t-breakdown"></table></div>
   </section>
 
   <div id="session-detail" class="modal hidden">
@@ -117,6 +137,6 @@
     <span id="last-run" class="muted"></span>
   </footer>
 
-  <script src="/static/app.js?v=ctx5"></script>
+  <script src="/static/app.js?v=prompt-search5"></script>
 </body>
 </html>

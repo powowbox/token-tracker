@@ -6,12 +6,16 @@ import sqlite3
 from collections import defaultdict
 from contextlib import contextmanager
 from pathlib import Path
+from datetime import datetime
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .db import DEFAULT_DB_PATH, connect, init
+from .discussions import leaderboard
+from .first_prompts import previews as first_prompt_previews
 from .ingest import run as run_ingest
 from .parse_claude import _tool_result_chars
 from .pricing import _lookup as _price_lookup, reload as _price_reload, cost_breakdown
@@ -183,6 +187,47 @@ def prompt_usage(session_id: str, turn_id: str | None = None,
     target["scope"] = "this_session_only; separate subagent and guardian sessions excluded"
     target["measurement"] = "logged_usage_at_refresh; final response may not yet be recorded"
     return target
+
+
+@app.get("/api/discussions")
+def discussions(tool: Literal["codex", "claude"] | None = None, model: str | None = None,
+                project: str | None = None, start: datetime | None = None, end: datetime | None = None,
+                agent: str | None = None, entrypoint: str | None = None,
+                include_children: bool = True, view: Literal["discussions", "unattached"] = "discussions",
+                pricing: Literal["complete", "partial", "unavailable"] | None = None,
+                sort: Literal["rank", "tokens", "cost", "fresh_input", "output", "title", "activity", "subagents"] = "tokens",
+                direction: Literal["asc", "desc"] = "desc",
+                search: str | None = Query(None, max_length=200),
+                limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
+    if start and end and start.timestamp() > end.timestamp():
+        raise HTTPException(422, "start must be before end")
+    with db() as c:
+        c.execute("BEGIN")  # One consistent read snapshot across aggregate queries.
+        return leaderboard(c, tool=tool, model=model, project=project,
+                           start=start.isoformat() if start else None, end=end.isoformat() if end else None,
+                           agent=agent, entrypoint=entrypoint, include_children=include_children,
+                           view=view, pricing=pricing, sort=sort, direction=direction, search=search, limit=limit, offset=offset)
+
+
+@app.post("/api/discussion-previews")
+def discussion_previews(session_ids: list[str] = Body(..., embed=True, min_length=1, max_length=20)):
+    if any(len(sid) > 200 or not sid.startswith(("codex:", "claude:")) for sid in session_ids):
+        raise HTTPException(422, "Use source-qualified session identifiers")
+    with db() as c:
+        c.execute("BEGIN")
+        response = first_prompt_previews(c, session_ids)
+    return JSONResponse(response, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/discussions/{discussion_id:path}")
+def discussion_detail(discussion_id: str, include_children: bool = True):
+    with db() as c:
+        c.execute("BEGIN")
+        report = leaderboard(c, discussion_id=discussion_id, include_children=include_children)
+    if not report["discussions"]:
+        raise HTTPException(404, "Discussion not found; use the root identifier from /api/discussions")
+    return {"discussion": report["discussions"][0], "last_successful_ingestion": report["last_successful_ingestion"],
+            "totals_scope": report["totals_scope"]}
 
 
 @app.get("/api/filters")

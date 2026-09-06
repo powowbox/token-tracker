@@ -1144,11 +1144,218 @@ function applyRange(preset) {
   refresh().finally(() => { STATE.filters._rangePreset = false; });
 }
 
+let discussionOffset = 0;
+let discussionRequest = 0;
+const discussionLimit = 10;
+let discussionSearch = "";
+let discussionSearchInput;
+let discussionSearchTimer;
+function mountDiscussionSearch() {
+  if (!discussionSearchInput) {
+    discussionSearchInput = document.createElement("input");
+    discussionSearchInput.id = "d-search";
+    discussionSearchInput.type = "search";
+    discussionSearchInput.maxLength = 200;
+    discussionSearchInput.placeholder = "Title or first prompt (3+ characters)";
+    discussionSearchInput.setAttribute("aria-label", "Filter titles and first prompts — at least 3 characters");
+    const changed = e => {
+      clearTimeout(discussionSearchTimer);
+      if (e.isComposing) return;
+      discussionSearchTimer = setTimeout(() => {
+        const draft = discussionSearchInput.value.trim();
+        const next = [...draft].length >= 3 ? draft : "";
+        if (next !== discussionSearch) { discussionSearch = next; loadDiscussions(); }
+      }, 250);
+    };
+    discussionSearchInput.addEventListener("input", changed);
+    discussionSearchInput.addEventListener("compositionend", changed);
+  }
+  document.querySelector(".discussion-title-header")?.append(discussionSearchInput);
+}
+
+function discussionSortHeader(key, label, numeric = false) {
+  const active = $("#d-sort").value === key;
+  const ascending = $("#d-direction").value === "asc";
+  const next = active ? (ascending ? "descending" : "ascending") : (["rank", "title"].includes(key) ? "ascending" : "descending");
+  return `<th${numeric ? ' class="num"' : key === 'title' ? ' class="discussion-title-header"' : ""} aria-sort="${active ? (ascending ? "ascending" : "descending") : "none"}"><button class="discussion-sort" data-discussion-sort="${key}" aria-label="Sort by ${label}, ${next}"${key === "activity" ? ' title="Sort by last recorded activity"' : ""}>${label}<span aria-hidden="true"> ${active ? (ascending ? "↑" : "↓") : "↕"}</span></button></th>`;
+}
+function discussionCost(d) {
+  return d.pricing_status === "unavailable" ? "Unavailable" : `${fmt.usd(d.known_cost)}${d.pricing_status === "partial" ? " · partial" : ""}`;
+}
+async function loadDiscussions(reset = true) {
+  if (reset) discussionOffset = 0;
+  const request = ++discussionRequest;
+  previewController?.abort();
+  hidePromptPreview();
+  const content = $("#d-content");
+  if (!content.querySelector("table")) content.textContent = "Loading discussions…";
+  content.setAttribute("aria-busy", "true");
+  $("#d-prev").disabled = true;
+  $("#d-next").disabled = true;
+  try {
+    const d = await api("/api/discussions" + queryString({sort: $("#d-sort").value, direction: $("#d-direction").value, include_children: $("#d-children").value,
+      search: discussionSearch, pricing: $("#d-pricing").value, view: $("#d-view").value, limit: discussionLimit, offset: discussionOffset}));
+    if (request !== discussionRequest) return;
+    $("#d-freshness").textContent = `Last successful ingestion: ${fmt.date(d.last_successful_ingestion)} · ${fmt.n(d.unattached_sessions)} unattached agents${d.title_metadata_available ? "" : " · title metadata unavailable; fallback names shown"}`;
+    const restoreSearchFocus = document.activeElement === discussionSearchInput;
+    const selection = discussionSearchInput ? [discussionSearchInput.selectionStart, discussionSearchInput.selectionEnd] : null;
+    content.innerHTML = `<table class="discussion-table"><thead><tr>${discussionSortHeader("rank", "Rank", true)}${discussionSortHeader("title", "Discussion")}${discussionSortHeader("activity", "Activity")}${discussionSortHeader("tokens", "Tokens", true)}${discussionSortHeader("cost", "Est. cost", true)}${discussionSortHeader("subagents", "Subagents", true)}</tr></thead><tbody>${d.discussions.map(r => `<tr>
+      <td class="num discussion-rank" data-label="Rank">${fmt.n(r.rank)}</td><td><button class="discussion-link" data-discussion="${escapeHtml(r.id)}">${escapeHtml(r.title)}</button><span class="discussion-meta prompt-preview-slot" data-preview="${escapeHtml(r.id)}">Loading first prompt…</span>${r.relationship_issue ? `<span class="discussion-warning">${escapeHtml(r.relationship_issue.replaceAll("_", " "))}</span>` : ""}</td>
+      <td data-label="Activity">${fmt.date(r.started_at).slice(0,10)}<br>${fmt.date(r.ended_at).slice(0,10)}</td>
+      <td class="num" data-label="Tokens">${fmt.n(r.total_tokens)}</td><td class="num cost" data-label="Est. cost">${discussionCost(r)}</td><td class="num" data-label="Subagents">${fmt.n(r.child_count)}</td></tr>`).join("")}</tbody></table>${d.discussions.length ? "" : '<p class="discussion-note">No discussions match these filters.</p>'}`;
+    mountDiscussionSearch();
+    if (restoreSearchFocus) {
+      discussionSearchInput.focus({preventScroll:true});
+      if (selection) discussionSearchInput.setSelectionRange(...selection);
+    }
+    content.setAttribute("aria-busy", "false");
+    $("#d-page").textContent = d.total ? `${discussionOffset+1}–${Math.min(discussionOffset+discussionLimit,d.total)} of ${d.total}` : "0 discussions";
+    $("#d-prev").disabled = discussionOffset === 0;
+    $("#d-next").disabled = discussionOffset + discussionLimit >= d.total;
+    content.querySelectorAll("[data-discussion]").forEach(b => b.addEventListener("click", () => openDiscussion(b.dataset.discussion)));
+    content.querySelectorAll("[data-discussion-sort]").forEach(button => button.addEventListener("click", () => {
+      const key = button.dataset.discussionSort;
+      $("#d-direction").value = $("#d-sort").value === key ? ($("#d-direction").value === "desc" ? "asc" : "desc") : (["rank", "title"].includes(key) ? "asc" : "desc");
+      $("#d-sort").value = key;
+      loadDiscussions();
+    }));
+    void loadPromptPreviews(d.discussions, request);
+  } catch (e) {
+    if (request !== discussionRequest) return;
+    content.setAttribute("aria-busy", "false");
+    let error = content.querySelector(".discussion-load-error");
+    if (!error) { error = document.createElement("p"); error.className = "discussion-load-error discussion-note"; content.append(error); }
+    error.textContent = "Discussions could not be loaded. Use Apply to retry.";
+    $("#d-page").textContent = "";
+    $("#d-freshness").textContent = "";
+  }
+}
+let previewController;
+let previewPopup;
+let previewTrigger;
+let previewTimer;
+
+function hidePromptPreview() {
+  clearTimeout(previewTimer);
+  if (previewPopup) previewPopup.hidden = true;
+  previewTrigger?.setAttribute("aria-expanded", "false");
+  previewTrigger = null;
+}
+function schedulePreviewClose() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => {
+    if (!previewPopup?.matches(":hover") && !previewPopup?.contains(document.activeElement) &&
+        !previewTrigger?.matches(":hover") && document.activeElement !== previewTrigger) hidePromptPreview();
+  }, 180);
+}
+function showPromptPreview(button, text) {
+  clearTimeout(previewTimer);
+  if (!previewPopup) {
+    previewPopup = document.createElement("div");
+    previewPopup.id = "first-prompt-popup";
+    previewPopup.className = "first-prompt-popup";
+    previewPopup.setAttribute("role", "region");
+    previewPopup.setAttribute("aria-label", "First prompt — full text");
+    const head = document.createElement("div"); head.className = "prompt-popup-head";
+    const label = document.createElement("strong"); label.textContent = "First prompt";
+    const close = document.createElement("button"); close.className = "btn"; close.textContent = "close";
+    close.addEventListener("click", () => { const trigger = previewTrigger; hidePromptPreview(); trigger?.focus({preventScroll:true}); hidePromptPreview(); });
+    head.append(label, close);
+    const body = document.createElement("div"); body.className = "prompt-popup-text"; body.tabIndex = 0;
+    previewPopup.append(head, body); document.body.append(previewPopup);
+    previewPopup.addEventListener("pointerenter", () => clearTimeout(previewTimer));
+    previewPopup.addEventListener("pointerleave", schedulePreviewClose);
+    previewPopup.addEventListener("focusout", schedulePreviewClose);
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && previewTrigger) {
+        const trigger = previewTrigger; const inside = previewPopup.contains(document.activeElement);
+        hidePromptPreview(); if (inside) { trigger.focus({preventScroll:true}); hidePromptPreview(); }
+      }
+    });
+    document.addEventListener("pointerdown", e => {
+      if (previewTrigger && !previewPopup.contains(e.target) && e.target !== previewTrigger) hidePromptPreview();
+    });
+    window.addEventListener("resize", hidePromptPreview);
+    window.addEventListener("scroll", e => { if (!previewPopup.contains(e.target)) hidePromptPreview(); }, true);
+  }
+  previewTrigger?.setAttribute("aria-expanded", "false");
+  previewTrigger = button; button.setAttribute("aria-expanded", "true");
+  previewPopup.querySelector(".prompt-popup-text").textContent = text;
+  previewPopup.querySelector(".prompt-popup-text").scrollTop = 0;
+  previewPopup.hidden = false;
+  const rect = button.getBoundingClientRect();
+  const bounds = previewPopup.getBoundingClientRect();
+  const below = rect.bottom + 6;
+  const top = below + bounds.height <= innerHeight-12 ? below : Math.max(12, rect.top-bounds.height-6);
+  previewPopup.style.left = `${Math.max(12, Math.min(rect.left, innerWidth-bounds.width-12))}px`;
+  previewPopup.style.top = `${Math.min(top, innerHeight-bounds.height-12)}px`;
+}
+async function loadPromptPreviews(rows, request) {
+  if (!rows.length) return;
+  const controller = new AbortController(); previewController = controller;
+  const labels = {unavailable:"First prompt unavailable", not_identifiable:"First prompt could not be identified",
+    no_text:"First message has no text — attachment", limit_exceeded:"Preview unavailable"};
+  try {
+    const response = await api("/api/discussion-previews", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({session_ids:rows.map(r=>r.id)}), signal:controller.signal, cache:"no-store"});
+    if (request !== discussionRequest) return;
+    document.querySelectorAll("[data-preview]").forEach(slot => {
+      const preview = response.previews[slot.dataset.preview];
+      if (preview?.status !== "available" || typeof preview.text !== "string") {
+        slot.textContent = labels[preview?.status] || labels.unavailable; return;
+      }
+      const button = document.createElement("button"); button.className = "prompt-preview";
+      button.textContent = preview.text.replace(/\s+/g, " ").trim();
+      button.setAttribute("aria-label", "First prompt: " + button.textContent.slice(0, 200) + (button.textContent.length > 200 ? "…" : "") + ". Open full text.");
+      button.setAttribute("aria-expanded", "false"); button.setAttribute("aria-controls", "first-prompt-popup");
+      button.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") showPromptPreview(button, preview.text); });
+      button.addEventListener("pointerleave", schedulePreviewClose);
+      button.addEventListener("focus", () => { if (button.matches(":focus-visible")) showPromptPreview(button, preview.text); });
+      button.addEventListener("blur", schedulePreviewClose);
+      button.addEventListener("keydown", e => {
+        if (["Enter", " ", "ArrowDown"].includes(e.key)) {
+          e.preventDefault(); showPromptPreview(button, preview.text);
+          previewPopup.querySelector(".prompt-popup-text").focus({preventScroll:true});
+        }
+      });
+      button.addEventListener("click", () => { if (previewTrigger === button) hidePromptPreview(); else showPromptPreview(button, preview.text); });
+      slot.replaceChildren(button);
+    });
+  } catch (e) {
+    if (request !== discussionRequest || controller.signal.aborted) return;
+    document.querySelectorAll("[data-preview]").forEach(slot => { slot.textContent = labels.unavailable; });
+  }
+}
+
+function discussionUsageRows(rows, label) {
+  return `<div class="discussion-scroll"><table><thead><tr><th>${label}</th><th class="num">Tokens</th><th class="num">Fresh</th><th class="num">Cached</th><th class="num">Output</th><th class="num">Est. cost</th></tr></thead><tbody>${rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td class="num">${fmt.n(r.total_tokens)}</td><td class="num">${fmt.n(r.fresh_input)}</td><td class="num">${fmt.n(r.cached_input)}</td><td class="num">${fmt.n(r.output)}</td><td class="num cost">${discussionCost(r)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+async function openDiscussion(id) {
+  const dialog = $("#discussion-dialog");
+  $("#dd-title").textContent = "Discussion";
+  $("#dd-content").textContent = "Loading…";
+  dialog.showModal();
+  try {
+    const report = await api(`/api/discussions/${encodeURIComponent(id)}?include_children=${$("#d-children").value}`);
+    const d = report.discussion;
+    $("#dd-title").textContent = d.title;
+    $("#dd-content").innerHTML = `<p class="discussion-note">${escapeHtml(d.tool)} · ${escapeHtml(d.originator || "unknown originator")} · ${escapeHtml(d.project || "unknown project")}<br>${fmt.date(d.started_at)} → ${fmt.date(d.ended_at)}</p>
+      <p><strong>${fmt.n(d.total_tokens)} tokens · ${discussionCost(d)}</strong></p>
+      <p class="discussion-note">${fmt.n(d.priced_steps)} priced steps / ${fmt.n(d.steps)} total · ${fmt.n(d.unpriced_tokens)} unpriced tokens. Reasoning: ${fmt.n(d.reasoning_in_output)} tokens, already included in output.</p>
+      ${d.unpriced_steps ? '<p class="discussion-warning">Unknown prices remain excluded from the known estimate.</p>' : ""}
+      ${d.metadata_incomplete ? '<p class="discussion-warning">Some relationship metadata could not be read. Only verified attachments are included.</p>' : ""}
+      ${d.relationship_issue ? `<p class="discussion-warning">Attachment: ${escapeHtml(d.relationship_issue.replaceAll("_", " "))}.</p>` : ""}
+      ${discussionUsageRows([{label:"Main",...d.main},{label:"Subagents",...d.children}],"Scope")}
+      <h4>Models</h4>${discussionUsageRows(d.by_model.map(r=>({label:r.model,...r})),"Model")}
+      <h4>Included sessions</h4>${discussionUsageRows(d.sessions.map(r=>({label:`${r.title || r.id} (${r.kind}${r.reasoning_efforts.length ? "; " + r.reasoning_efforts.join(", ") : ""})`,...r})),"Session")}
+      <p class="discussion-note">Lifetime imported usage · last successful ingestion: ${fmt.date(report.last_successful_ingestion)}. Recent log writes may not yet be imported. ${d.include_children ? "Verified subagents included." : "Main usage only."}</p>`;
+  } catch (e) { $("#dd-content").textContent = "Discussion could not be loaded. Close and retry."; }
+}
+
 async function refresh() {
   readFilters();
   STATE.mcpCache = null;  // invalidate when filters change
-  await loadStats();      // also triggers loadBreakdown via cached statsCache
-  await loadIngestRuns();
+  await Promise.all([loadStats(), loadIngestRuns(), loadDiscussions()]);
 }
 
 async function reingest() {
@@ -1209,8 +1416,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadFilters();
   await refresh();
 
+  ["#d-sort", "#d-direction", "#d-children", "#d-pricing", "#d-view"].forEach(id => $(id).addEventListener("change", () => loadDiscussions()));
+  $("#d-prev").addEventListener("click", () => { discussionOffset = Math.max(0, discussionOffset-discussionLimit); loadDiscussions(false); });
+  $("#d-next").addEventListener("click", () => { discussionOffset += discussionLimit; loadDiscussions(false); });
+  $("#dd-close").addEventListener("click", () => $("#discussion-dialog").close());
   $("#apply").addEventListener("click", refresh);
   $("#reset").addEventListener("click", () => {
+    clearTimeout(discussionSearchTimer); discussionSearch = "";
+    if (discussionSearchInput) discussionSearchInput.value = "";
     $("#f-tool").value = ""; $("#f-model").value = ""; $("#f-project").value = "";
     $("#f-agent").value = "";
     $("#f-entrypoint").value = "";

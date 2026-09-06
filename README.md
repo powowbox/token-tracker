@@ -9,9 +9,39 @@ Nothing leaves your machine.
 
 ![token-tracker dashboard](docs/dashboard.png)
 
+## Discussion leaderboard — 2026-09-06
+
+**Top discussions by usage** ranks complete discussions using lifetime usage from
+`tokens.db`, with Codex discussion titles and verified subagents included by default.
+Click a title to compare main/child usage, models, token categories and pricing coverage.
+The separate Rank column keeps each discussion’s token-based rank when sorting by
+other columns. Discussion titles sort alphabetically in their own column.
+Click a column header to sort all matching discussions; click again to reverse the
+order. Activity sorts by the last recorded activity. The sort/order selectors also
+work on mobile, and unknown costs stay last in either direction. The Discussion
+header also filters titles and first-prompt text automatically from three characters,
+across all pages.
+
+Each discussion now shows its **first user prompt below the title**, truncated to two
+lines. Hover to read the complete text; keyboard and touch access are also supported.
+Previews load separately after the ranking, use a bounded memory cache, and do not
+trigger ingestion or copy prompt text into the databases. Missing/ambiguous prompts
+are labeled explicitly. Project and model information remains in the detail view.
+
+- **Previously:** session breakdowns displayed independent sessions and totals within the selected period.
+- **Now:** the discussion leaderboard groups explicitly linked child sessions and automatic reviews, without counting Claude's already-grouped subagents twice.
+- Titles use Codex `thread_name`, then `threads.name`; missing titles fall back to project/date. Prompt text is never used as a title fallback.
+- Date and model filters select discussions while preserving their lifetime totals. Choose main-only usage, pricing coverage, or unattached agents; sort by tokens, known estimated cost, fresh input or output.
+- Unknown costs stay **partial** or **unavailable**. The last successful ingestion is shown; opening the leaderboard does not re-ingest logs.
+
+No database migration or rebuild is needed. Restart an existing server after updating
+(use `make server-restart` for the server service), then reload the dashboard.
+The snapshot API and `AGENTS.md` reporting workflow are unchanged.
+See [discussion API, grouping rules and validation](docs/DISCUSSIONS.md).
+
 ## Changes and improvements — 2026-09-05
 
-This release includes the Codex accounting repair, partial-cost dashboard, 
+This release includes the Codex accounting repair, partial-cost dashboard and agent usage instructions.
 
 ### Report the agent’s token consumption after each prompt.
 
@@ -238,13 +268,34 @@ Stop the server with Ctrl+C in the console that launched it. From the Token Trac
 project directory, run `make server` (or `./scripts/run-server.sh`) again. Keep that
 console open. Verify `GET /api/health` responds successfully after restart.
 
-### Service-managed server
+### Service-managed server (macOS)
 
-If you configured the web server as a service, restart it through the service
-manager and service definition used for that installation. This project does not
-supply a web-server service definition, so there is no universal service name or
-restart command. Check that service's configuration and logs; do not start a
-second console server on the same port.
+From the project directory, run `make server-service` to install and start a
+per-user LaunchAgent. It starts at user login (not before login), remains available
+independently of your coding agent, and restarts automatically if its process exits.
+It listens only on `127.0.0.1:8732` and uses the existing `.venv` without code reload.
+Run `uv sync` first if the environment is missing. Stop any console server before
+installation; the installer refuses an occupied port rather than killing it.
+
+| Command | Action |
+|---------|--------|
+| `make server-service` | Install/update and start the server service |
+| `make server-status` | Check whether the service is loaded |
+| `make server-restart` | Restart after code or dependency updates |
+| `make server-stop` | Unload now; it can load again at the next login |
+| `make server-start` | Start an installed, stopped service |
+| `make server-uninstall` | Stop and remove automatic startup |
+
+The generated definition lives at
+`~/Library/LaunchAgents/com.user.token-tracker.server.plist`. Paths are resolved at
+installation time, not hard-coded in the repository. Logs are written to
+`~/Library/Logs/token-tracker-server.log` and
+`~/Library/Logs/token-tracker-server.error.log`.
+
+Keep the checkout and its virtual environment available at their installed
+location. Before moving the checkout, uninstall the service and reinstall it
+from the new location. Do not use `make server` while the service owns the port.
+For an independently configured third-party service, use its own service manager.
 
 ### Periodic ingestion is separate
 
