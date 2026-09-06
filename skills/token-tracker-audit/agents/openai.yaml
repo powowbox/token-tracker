@@ -1,0 +1,4 @@
+interface:
+  display_name: "Token Tracker Project Audit"
+  short_description: "Audit token usage and choose evidence-backed changes"
+  default_prompt: "Use $token-tracker-audit to audit this project's token consumption and propose changes for my approval."

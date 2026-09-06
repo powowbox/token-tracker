@@ -1,9 +1,6 @@
 # token-tracker
 
-Local dashboard for Claude Code and Codex (including JetBrains integration logs) token usage and cost. Walks the
-JSONL logs each tool already writes, normalizes them into SQLite, and serves a small
-web UI with totals, daily charts, per-model / per-project / per-session breakdowns, and
-MCP-server usage.
+Local dashboard for measuring and optimizing Claude Code and Codex token usage and estimated cost, including JetBrains integration logs. Walks the JSONL logs each tool already writes, normalizes them into SQLite, and serves a small web UI with totals, daily charts, per-model / per-project / per-session breakdowns, and MCP-server usage. Pair it with the audit skill to turn measured consumption into project-specific, testable optimizations.
 
 Nothing leaves your machine.
 
@@ -17,6 +14,7 @@ Understand which coding discussions consume the most tokens, what drives their e
   Tokens: 27,987 / input: 477 fresh, 27,264 cached / output 246 / est. cost: $0.04 / MCP: 0 calls.
   ```
 
+- **Project-specific optimizations, backed by evidence.** Pair Token Tracker’s usage data with the [audit skill](skills/token-tracker-audit/SKILL.md) to identify opportunities to reduce token consumption based on measurable, testable evidence—not assumptions. The skill investigates your most consuming sessions and archived prompts, then proposes changes tailored to your project’s workflows, agent instructions, skills and MCP usage. Each proposal explains the evidence, the exact change, the expected savings where estimable, and how to verify the result. You choose which changes to apply.
 - **Claude Code and Codex in one local dashboard**, including Codex sessions from JetBrains. Uses existing logs without changing how you run your agents.
 - **Complete discussion totals.** Rank discussions by lifetime usage, include explicitly linked subagents and automatic reviews, and compare their contribution with the main session.
 - **Recognizable, searchable discussions.** Find discussions by their Codex title or first prompt, preview the full prompt, and sort the leaderboard.
@@ -31,6 +29,31 @@ Provider dashboards help track account limits, API spending or organization-wide
 Estimated costs are API-equivalent comparisons, not invoices or subscription quota measurements. Results depend on the available logs; MCP text-size estimates are not billed token counts. Prompt reports measure newly logged usage for the selected session between two snapshots; they exclude separate agent sessions and the final answer generated after the measurement.
 
 ![token-tracker dashboard](docs/dashboard.png)
+
+## Project token audit skill
+
+The [token-tracker-audit skill](skills/token-tracker-audit/SKILL.md) investigates the
+most consuming sessions and prompts, illustrates findings with sanitized archive
+excerpts, and proposes numbered optimizations for your approval. It asks for the
+analysis period, flags insufficient evidence, and explains expected savings,
+tradeoffs and exact changes to agent instructions, skills, MCP usage or workflows.
+No project configuration is changed until you select the proposals to apply.
+
+Copy the complete `skills/token-tracker-audit` folder into your agent's supported
+skill directory. For Codex, from this repository:
+
+```sh
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R skills/token-tracker-audit "${CODEX_HOME:-$HOME/.codex}/skills/"
+```
+
+Invoke `$token-tracker-audit` in the target project and provide the period and
+tracker database location when asked. Other agents can use the same SKILL.md and
+resources through their own skill-loading mechanism. The bundled aggregate helper
+requires Python 3.10+ and opens SQLite read-only; it never rebuilds or ingests data.
+Its initial ranking is by session; archive analysis supplies prompt-level evidence
+only where reliable attribution exists. This audit skill is separate from the
+lightweight per-prompt reporting instructions in `AGENTS.md`.
 
 ## Discussion leaderboard — 2026-09-06
 
