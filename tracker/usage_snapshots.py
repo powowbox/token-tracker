@@ -1,5 +1,8 @@
 """Persistent session-scoped checkpoints; tokens.db and source logs are never written."""
 import hashlib
+import copy
+import threading
+from collections import OrderedDict
 import json
 import sqlite3
 import uuid
@@ -27,6 +30,9 @@ class SnapshotStore:
     def __init__(self, path=None, discover=None):
         self.path = path or Path(__file__).resolve().parent.parent / 'usage-snapshots.sqlite3'
         self.discover = discover
+        self._lock = threading.RLock()
+        self._identities = {}
+        self._reads = OrderedDict()
 
     def connection(self):
         c = sqlite3.connect(self.path)
@@ -36,18 +42,32 @@ class SnapshotStore:
         return c
 
     def sources(self, session_id):
+        with self._lock:
+            return self._sources(session_id)
+
+    def _sources(self, session_id):
         source, identifier = session_id.split(':', 1)
         if source not in ('codex', 'claude') or not identifier:
             raise SnapshotError(422, 'Unsupported snapshot source; supported sources: codex, claude')
         parser = parse_codex if source == 'codex' else parse_claude
         paths = []
-        for path in (self.discover or parser.discover_files)():
+        discovered = (self.discover or parser.discover_files)()
+        live = set(discovered)
+        self._identities = {p: v for p, v in self._identities.items() if p in live}
+        for path in discovered:
             if source == 'claude':
                 # Main-session logs only: Claude subagent logs share the parent ID.
                 if path.parent.name != 'subagents' and path.stem == identifier:
                     paths.append(path)
                 continue
             try:
+                signature = self.signature(path)
+                cached = self._identities.get(path)
+                if cached and cached[0] == signature:
+                    if cached[1] == session_id:
+                        paths.append(path)
+                    continue
+                identity = None
                 with path.open('rb') as f:
                     for _, line in zip(range(100), f):
                         try:
@@ -55,16 +75,40 @@ class SnapshotStore:
                         except ValueError:
                             continue
                         if d.get('type') == 'session_meta':
-                            if 'codex:' + str(d.get('payload', {}).get('id')) == session_id:
-                                paths.append(path)
+                            identity = 'codex:' + str(d.get('payload', {}).get('id'))
                             break
+                if self.signature(path) != signature:
+                    raise SnapshotError(503, 'Source changed during discovery; retry')
+                self._identities[path] = (signature, identity)
+                if identity == session_id:
+                    paths.append(path)
             except OSError:
                 # Do not silently omit a potentially relevant file.
                 raise SnapshotError(503, 'A source log is unavailable; retry when logs are accessible')
         return paths
 
     @staticmethod
-    def read(path, baseline=None, source="codex"):
+    def signature(path):
+        st = path.stat()
+        return st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+
+    def read(self, path, baseline=None, source="codex"):
+        with self._lock:
+            signature = self.signature(path)
+            key = (str(path), source, signature, json.dumps(baseline, sort_keys=True))
+            if key in self._reads:
+                self._reads.move_to_end(key)
+                return copy.deepcopy(self._reads[key])
+            result = self._read(path, baseline, source)
+            if self.signature(path) != signature:
+                raise SnapshotError(503, 'Source changed during refresh; retry')
+            self._reads[key] = copy.deepcopy(result)
+            while len(self._reads) > 8:
+                self._reads.popitem(last=False)
+            return result
+
+    @staticmethod
+    def _read(path, baseline=None, source="codex"):
         st = path.stat()
         with path.open('rb') as f:
             data = f.read(st.st_size)

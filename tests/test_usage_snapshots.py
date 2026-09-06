@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from tracker.usage_snapshots import SnapshotStore, SnapshotError
@@ -21,6 +22,15 @@ class SnapshotTests(unittest.TestCase):
     def write(self,path,rows,mode='w'):
         with path.open(mode) as f:
             f.write(''.join(json.dumps(r)+'\n' for r in rows))
+
+    def test_cache_skips_parse_but_invalidates_on_append(self):
+        sid=self.store.create('a')['sid']
+        self.store.consumption(sid)
+        with patch('tracker.usage_snapshots.parse_codex.parse_file',side_effect=AssertionError('Unexpected reparse')):
+            self.assertEqual(self.store.consumption(sid)['tokens']['total'],0)
+            self.store.create('a')
+        self.write(self.path,[token(usage(150,60,20,4),usage(50,20))],'a')
+        self.assertEqual(self.store.consumption(sid)['tokens']['total'],60)
 
     def test_delta_isolated_persistent_and_repeatable(self):
         sid=self.store.create('a')['sid']

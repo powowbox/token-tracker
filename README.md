@@ -13,9 +13,9 @@ Nothing leaves your machine.
 
 This release includes the Codex accounting repair, partial-cost dashboard, 
 
-### Add a skill that reports the agent’s token consumption after each prompt.
+### Report the agent’s token consumption after each prompt.
 
-A portable [prompt-usage skill](skills/prompt-usage/SKILL.md) for snapshot-based usage reporting, with stop/resume controls and non-blocking error handling.
+Copy the [token usage instructions](docs/AGENTS_TOKEN_USAGE.md) into your agent’s `AGENTS.md` for snapshot-based reporting, stop/resume controls and non-blocking error handling. No separate skill is required.
 
 ### Changes 
 
@@ -68,7 +68,7 @@ mean Codex for compatibility. Claude's separate subagent logs are excluded, and
 repeated streamed usage records are reconciled by message identity; decreasing
 counters or conflicting identities fail explicitly instead of inventing a delta.
 
-The skill is independent of the client: use any available HTTP tool or curl.
+The workflow is independent of the client: use any available HTTP tool or curl.
 RTK is optional and no Codex-only environment variable is universally required.
 Use trusted session metadata from the integration; an agent without a matching
 server log adapter cannot measure itself merely by issuing these API calls.
@@ -85,34 +85,32 @@ Results measure newly logged usage, so delayed records may cross checkpoint boun
 and the final check cannot include the answer generated afterward.
 See [the agent usage guide](docs/AGENT_USAGE.md) for requests, JetBrains access and limits.
 
-## Prompt-usage skill: controls and failure handling
+## AGENTS.md instructions: controls and failure handling
 
-The portable skill is included at [skills/prompt-usage/SKILL.md](skills/prompt-usage/SKILL.md).
-Copy the entire `skills/prompt-usage` folder into your agent's supported skills
-directory, or use its persistent-instruction mechanism if it does not discover
-SKILL.md files. For a standard Codex installation, use `$CODEX_HOME/skills` when
-configured, otherwise `~/.codex/skills`. Review an existing copy before replacing
-it. Reload the agent's skill discovery or start a new session, then invoke
-`$prompt-usage` in Codex or the equivalent mechanism in your agent. The skill calls the local tracker API directly and contains no
-personal installation path.
+Copy [docs/AGENTS_TOKEN_USAGE.md](docs/AGENTS_TOKEN_USAGE.md) into your project's
+`AGENTS.md`, or the persistent-instruction mechanism supported by your agent.
+Remove any previous instruction to invoke `$prompt-usage` to avoid duplicate
+tracking. The former standalone skill has been removed from this repository.
 
-The `prompt-usage` skill instructs the agent to use the two-request snapshot
-workflow and append a usage summary to its final answer. It calls the HTTP API
-directly; no helper-script location or personal installation path is required.
-To require tracking for each prompt, add this to the agent's persistent instructions:
+The section contains both API requests, trusted session identification, permission
+requests for blocked localhost access, user controls and the exact usage footer.
+It contains no personal installation path and requires no separate skill-file read.
+Persistent instructions guide the agent; they are not executable pre/post hooks.
 
-```text
-For every prompt, use $prompt-usage while tracking is enabled.
-Create a snapshot before task work, preserve its SID, and report its delta before
-the final answer. Honor the user's stop, resume and skip instructions.
-```
+### Tracking overhead
 
-A skill is an instruction-based workflow, not an executable pre/post hook.
-Automatic skill discovery alone does not guarantee every-prompt execution.
+The workflow lives directly in agent instructions; detailed recovery guidance
+is requested only after an error. The server caches source identities and up to eight parsed
+snapshot results. Unchanged files reuse validated results; size, inode or timestamp
+changes invalidate them. Changed files still replay and verify source history to
+preserve accounting correctness. Discovery continues to check for added/removed
+logs. Cold requests and appended logs do not receive the same speedup as repeated
+unchanged requests. Agent tool execution and sandbox access can add separate latency.
+The displayed usage format is unchanged.
 
 ### Compact usage output
 
-The skill reports: `Tokens: TOTAL / input: FRESH fresh, CACHED cached / output OUTPUT /
+The agent reports: `Tokens: TOTAL / input: FRESH fresh, CACHED cached / output OUTPUT /
 est. cost: COST / MCP: CALLS calls, ERRORS errors.`
 Estimated costs are rounded to two decimal places (for example, `$0.50`).
 Only actionable high-usage warnings are appended. Normal/insufficient-history
@@ -134,7 +132,7 @@ messages during ongoing work retain the same SID unless tracking is stopped or
 skipped.
 
 After the first tracked prompt of a session, the agent explains the stop, resume
-and skip controls once. If the skill is enabled midway through a session, the
+and skip controls once. If tracking is enabled midway through a session, the
 notice appears after its first tracked prompt. No reminders are shown while
 tracking is disabled.
 

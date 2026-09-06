@@ -203,18 +203,12 @@ The response includes cohort size, per-metric median, percentile, threshold and
 current value. No history means no “normal” claim. This is an on-request warning;
 it does not push notifications, stop the agent or impose a budget.
 
-## Instruction to give an agent
+## Instructions to give an agent
 
-> Before executing other task tools or commands, create a Token Tracker snapshot
-> with POST /api/usage-snapshots and your verified CODEX_THREAD_ID (fallback:
-> CODEX_SESSION_ID). Keep the returned sid. Do not guess a session or require a
-> turn ID. After finishing the work, POST /api/usage-snapshots/{sid}/consumption.
-> Report the returned token delta, known estimated cost, unpriced coverage, MCP
-> counts/errors and any high-usage warning. Say “usage since snapshot, as currently
-> logged”; separate subagent sessions and the not-yet-generated final answer are
-> excluded. Reuse the same SID for retries. If identity or localhost access is
-> unavailable, say that measurement could not be established. Use the integration's
-> approved execution route; do not change settings or poll after every tool call.
+Copy [AGENTS_TOKEN_USAGE.md](AGENTS_TOKEN_USAGE.md) into your agent's `AGENTS.md`
+or equivalent persistent instructions. This replaces the standalone skill and
+includes the two-request workflow, approval handling, user controls and footer.
+Remove any previous `$prompt-usage` invocation instruction to avoid duplication.
 
 After completion, a later request can retrieve the final logged usage. Even a
 completion event can precede a final token update; allow logs to settle. The
