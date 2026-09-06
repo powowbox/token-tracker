@@ -7,6 +7,29 @@ MCP-server usage.
 
 Nothing leaves your machine.
 
+## Why Token Tracker?
+
+Understand which coding discussions consume the most tokens, what drives their estimated cost, and where to investigate potential savings.
+
+- **Prompt usage and estimated cost, directly in your agent’s chat.** See token consumption and estimated cost at the end of each prompt, without opening a separate dashboard. Get a warning when consumption is unusually high and enough history is available. Works with supported agents through simple [AGENTS.md instructions](docs/AGENTS_TOKEN_USAGE.md).
+
+  ```text
+  Tokens: 27,987 / input: 477 fresh, 27,264 cached / output 246 / est. cost: $0.04 / MCP: 0 calls.
+  ```
+
+- **Claude Code and Codex in one local dashboard**, including Codex sessions from JetBrains. Uses existing logs without changing how you run your agents.
+- **Complete discussion totals.** Rank discussions by lifetime usage, include explicitly linked subagents and automatic reviews, and compare their contribution with the main session.
+- **Recognizable, searchable discussions.** Find discussions by their Codex title or first prompt, preview the full prompt, and sort the leaderboard.
+- **Detailed token accounting.** Separate fresh input, cached input and output, with breakdowns by project and model—even when a session changes models. Repeated usage events are reconciled to avoid double counting.
+- **MCP visibility.** Inspect recorded tool calls, errors and text-output size estimates to investigate tool-related overhead.
+- **Local data, transparent estimates.** Logs are processed locally. Unknown prices remain explicit, and partial estimates show their pricing coverage.
+
+### How it complements other usage tools
+
+Provider dashboards help track account limits, API spending or organization-wide activity. Token Tracker focuses on understanding local coding work: which discussion consumed the tokens, how projects and models compare, and how much linked agents contributed—with prompt usage and estimated cost reported directly in the conversation.
+
+Estimated costs are API-equivalent comparisons, not invoices or subscription quota measurements. Results depend on the available logs; MCP text-size estimates are not billed token counts. Prompt reports measure newly logged usage for the selected session between two snapshots; they exclude separate agent sessions and the final answer generated after the measurement.
+
 ![token-tracker dashboard](docs/dashboard.png)
 
 ## Discussion leaderboard — 2026-09-06
