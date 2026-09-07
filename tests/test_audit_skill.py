@@ -1,4 +1,5 @@
 """Synthetic regression checks for the shipped read-only audit helper."""
+from contextlib import closing
 import importlib.util
 from pathlib import Path
 import sqlite3
@@ -18,13 +19,13 @@ class AuditSkillTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.db = Path(self.tmp.name) / "usage.sqlite3"
-        with sqlite3.connect(self.db) as c:
+        with closing(sqlite3.connect(self.db)) as c, c:
             c.executescript(SCHEMA)
             c.execute("INSERT INTO sessions(id,tool,session_uuid,cwd,session_kind) VALUES ('codex:a','codex','a','/project','user')")
             c.execute("INSERT INTO sessions(id,tool,session_uuid,cwd) VALUES ('codex:b','codex','b','/other')")
 
     def add(self, ts, model="model-a", cost=1.0, session="codex:a", line=1):
-        with sqlite3.connect(self.db) as c:
+        with closing(sqlite3.connect(self.db)) as c, c:
             c.execute("""INSERT INTO messages(session_id,tool,ts,model,input_tokens,cache_read,
                 cache_write_5m,cache_write_1h,output_tokens,reasoning_tokens,cache_write_input_tokens,
                 est_cost_usd,source_file,source_line) VALUES (?,'codex',?,?,10,100,3,2,20,5,7,?,'missing.jsonl',?)""",
@@ -39,7 +40,7 @@ class AuditSkillTests(unittest.TestCase):
         self.add("2026-09-03T00:00:00Z", line=3)  # exclusive end
         self.add("2026-08-31T23:00:00Z", line=4)  # preceding period
         self.add("2026-09-02T00:00:00Z", session="codex:b", line=5)
-        with sqlite3.connect(self.db) as c:
+        with closing(sqlite3.connect(self.db)) as c, c:
             for call in ("one", "two"):
                 c.execute("""INSERT INTO mcp_calls(session_id,tool,ts,server,tool_name,call_id,is_error,source_file,source_line)
                     VALUES ('codex:a','codex','2026-09-02T00:00:00Z','mcp','search',?,1,'missing.jsonl',1)""", (call,))
@@ -62,7 +63,7 @@ class AuditSkillTests(unittest.TestCase):
         t=self.run_summary()["current"]["totals"]
         self.assertIsNone(t["known_api_estimate_usd"])
         self.assertEqual(t["pricing_coverage"],"unpriced")
-        with sqlite3.connect(self.db) as c:
+        with closing(sqlite3.connect(self.db)) as c, c:
             c.execute("UPDATE messages SET est_cost_usd=0")
         self.assertEqual(self.run_summary()["current"]["totals"]["known_api_estimate_usd"],0)
 
@@ -73,7 +74,7 @@ class AuditSkillTests(unittest.TestCase):
         self.assertFalse(missing.exists())
         with self.assertRaises(ValueError):
             audit.summarize(self.db,"/project","2026-09-01","2026-09-02")
-        with sqlite3.connect(self.db) as c:
+        with closing(sqlite3.connect(self.db)) as c, c:
             c.execute("DROP TABLE messages")
         with self.assertRaisesRegex(ValueError,"Unsupported schema"):
             self.run_summary()
