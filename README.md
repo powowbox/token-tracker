@@ -11,7 +11,7 @@ Understand which coding discussions consume the most tokens, what drives their e
 - **Prompt usage and estimated cost, directly in your agent’s chat.** See token consumption and estimated cost at the end of each prompt, without opening a separate dashboard. Get a warning when consumption is unusually high and enough history is available. Works with supported agents through simple [AGENTS.md instructions](docs/AGENTS_TOKEN_USAGE.md).
 
   ```text
-  Tokens: 27,987 / input: 477 fresh, 27,264 cached / output 246 / est. cost: $0.04 / MCP: 0 calls.
+  Tokens: 27,987 / input: 477 fresh - 27,264 cached / output 246 / est. cost: $0.04 / MCP: 0 calls.
   ```
 
 - **Project-specific optimizations, backed by evidence.** Pair Token Tracker’s usage data with the [audit skill](skills/token-tracker-audit/SKILL.md) to identify opportunities to reduce token consumption based on measurable, testable evidence—not assumptions. The skill investigates your most consuming sessions and archived prompts, then proposes changes tailored to your project’s workflows, agent instructions, skills and MCP usage. Each proposal explains the evidence, the exact change, the expected savings where estimable, and how to verify the result. You choose which changes to apply.
@@ -186,7 +186,7 @@ The displayed usage format is unchanged.
 
 ### Compact usage output
 
-The agent reports: `Tokens: TOTAL / input: FRESH fresh, CACHED cached / output OUTPUT /
+The agent reports: `Tokens: TOTAL / input: FRESH fresh - CACHED cached / output OUTPUT /
 est. cost: COST / MCP: CALLS calls, ERRORS errors.`
 Estimated costs are rounded to two decimal places (for example, `$0.50`).
 Only actionable high-usage warnings are appended. Normal/insufficient-history
