@@ -191,6 +191,12 @@ def leaderboard(conn, *, meta=None, tool=None, model=None, project=None, start=N
             pass
     roots, issues = _roots(sessions, edges)
     # Aggregate in SQL; never load messages or conversation text into the API.
+    period_clauses, period_params = [], []
+    for value, op in ((start, ">="), (end, "<=")):
+        if value:
+            period_clauses.append(f"julianday(ts) {op} julianday(?)")
+            period_params.append(value)
+    period_where = " WHERE " + " AND ".join(period_clauses) if period_clauses else ""
     rows = [dict(r) for r in conn.execute("""
         SELECT session_id, model, reasoning_effort, agent_id, agent_type,
                MIN(ts) AS started_at, MAX(ts) AS ended_at, COUNT(*) AS steps,
@@ -201,8 +207,7 @@ def leaderboard(conn, *, meta=None, tool=None, model=None, project=None, start=N
                SUM(est_cost_usd IS NULL) AS unpriced_steps,
                SUM(CASE WHEN est_cost_usd IS NULL THEN input_tokens + cache_write_5m + cache_write_1h + cache_read + output_tokens ELSE 0 END) AS unpriced_tokens,
                SUM(est_cost_usd) AS known_cost
-        FROM messages GROUP BY session_id, model, reasoning_effort, agent_id, agent_type
-    """)]
+        FROM messages """ + period_where + " GROUP BY session_id, model, reasoning_effort, agent_id, agent_type", period_params)]
     clauses, params = [], []
     for col, value, op in (("m.tool", tool, "="), ("m.model", model, "="), ("s.cwd", project, "="),
                            ("m.ts", start, ">="), ("m.ts", end, "<="), ("s.entrypoint", entrypoint, "=")):
@@ -254,8 +259,8 @@ def leaderboard(conn, *, meta=None, tool=None, model=None, project=None, start=N
         item = dict(id=root, title=title, title_source=title_source, project=s["cwd"], tool=s["tool"],
                     originator=s["originator"], session_kind=s["session_kind"],
                     models=sorted({r["model"] or "unknown" for r in usage}),
-                    started_at=min([r["started_at"] for r in usage] + [sessions[sid]["started_at"] for sid in selected_members if sessions[sid]["started_at"]], default=None),
-                    ended_at=max([r["ended_at"] for r in usage] + [sessions[sid]["ended_at"] for sid in selected_members if sessions[sid]["ended_at"]], default=None),
+                    started_at=min([r["started_at"] for r in usage] + ([sessions[sid]["started_at"] for sid in selected_members if sessions[sid]["started_at"]] if not (start or end) else []), default=None),
+                    ended_at=max([r["ended_at"] for r in usage] + ([sessions[sid]["ended_at"] for sid in selected_members if sessions[sid]["ended_at"]] if not (start or end) else []), default=None),
                     child_count=len(group)-1+len(embedded), include_children=include_children,
                     relationship_issue=issues.get(root), metadata_incomplete=bool(group & missing), **totals)
         if discussion_id:
@@ -298,6 +303,6 @@ def leaderboard(conn, *, meta=None, tool=None, model=None, project=None, start=N
     result = known + missing_values
     last_ingest = conn.execute("SELECT MAX(finished_at) FROM ingest_runs WHERE error IS NULL AND finished_at IS NOT NULL").fetchone()[0]
     return {"discussions": result[offset:offset+limit], "total": len(result), "limit": limit, "offset": offset,
-            "include_children": include_children, "totals_scope": "lifetime_imported_usage",
+            "include_children": include_children, "totals_scope": "selected_period_imported_usage" if start or end else "lifetime_imported_usage",
             "last_successful_ingestion": last_ingest, "title_metadata_available": available,
             "unattached_sessions": sum(1 for sid in sessions if roots[sid] == sid and (sid in issues or sessions[sid]["session_kind"] in ("guardian", "subagent")))}

@@ -220,10 +220,14 @@ def discussion_previews(session_ids: list[str] = Body(..., embed=True, min_lengt
 
 
 @app.get("/api/discussions/{discussion_id:path}")
-def discussion_detail(discussion_id: str, include_children: bool = True):
+def discussion_detail(discussion_id: str, include_children: bool = True,
+                      start: datetime | None = None, end: datetime | None = None):
+    if start and end and start.timestamp() > end.timestamp():
+        raise HTTPException(422, "start must be before end")
     with db() as c:
         c.execute("BEGIN")
-        report = leaderboard(c, discussion_id=discussion_id, include_children=include_children)
+        report = leaderboard(c, discussion_id=discussion_id, include_children=include_children,
+                             start=start.isoformat() if start else None, end=end.isoformat() if end else None)
     if not report["discussions"]:
         raise HTTPException(404, "Discussion not found; use the root identifier from /api/discussions")
     return {"discussion": report["discussions"][0], "last_successful_ingestion": report["last_successful_ingestion"],

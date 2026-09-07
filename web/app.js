@@ -1111,8 +1111,8 @@ function readFilters() {
   STATE.filters.entrypoint = $("#f-entrypoint").value;
   // start/end may already be ISO strings from quick-range presets; fall back to the date inputs.
   if (!STATE.filters._rangePreset) {
-    STATE.filters.start = $("#f-start").value ? $("#f-start").value + "T00:00:00Z" : "";
-    STATE.filters.end = $("#f-end").value ? $("#f-end").value + "T23:59:59Z" : "";
+    STATE.filters.start = $("#f-start").value ? new Date($("#f-start").value + "T00:00:00").toISOString() : "";
+    STATE.filters.end = $("#f-end").value ? new Date($("#f-end").value + "T23:59:59.999").toISOString() : "";
   }
   STATE.filters.granularity = $("#f-granularity").value;
 }
@@ -1137,11 +1137,15 @@ function applyRange(preset) {
   STATE.filters.start = start;
   STATE.filters.end = preset === "all" ? "" : end;
   STATE.filters._rangePreset = true;
-  $("#f-start").value = start ? start.slice(0, 10) : "";
-  $("#f-end").value = preset === "all" ? "" : end.slice(0, 10);
+  const localDate = value => {
+    const d = new Date(value);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  };
+  $("#f-start").value = start ? localDate(start) : "";
+  $("#f-end").value = preset === "all" ? "" : localDate(end);
   $("#f-granularity").value = gran;
   $$(".btn.range").forEach(b => b.classList.toggle("active", b.dataset.range === preset));
-  refresh().finally(() => { STATE.filters._rangePreset = false; });
+  refresh();
 }
 
 let discussionOffset = 0;
@@ -1182,6 +1186,27 @@ function discussionSortHeader(key, label, numeric = false) {
 function discussionCost(d) {
   return d.pricing_status === "unavailable" ? "Unavailable" : `${fmt.usd(d.known_cost)}${d.pricing_status === "partial" ? " · partial" : ""}`;
 }
+// Compare imported coverage with the selected interval, not with conversation dates.
+function ingestionGuidance(last, start, end, now = Date.now()) {
+  const stamp = last ? Date.parse(last) : NaN;
+  if (!Number.isFinite(stamp)) return "No data has been imported yet. Refresh usage to import available logs.";
+  const from = start ? Date.parse(start) : NaN;
+  const until = end ? Math.min(Date.parse(end), now) : now;
+  // A range ending around now (including Today) gets a five-minute grace period.
+  const ongoing = !end || Date.parse(end) >= now - 5 * 60 * 1000;
+  if (stamp >= until || (ongoing && now - stamp <= 5 * 60 * 1000)) return "";
+  if (Number.isFinite(from) && stamp < from) return "Usage has not been refreshed for this period. Refresh usage to check for available data.";
+  return "Usage was last refreshed during this period. More recent activity may not be included.";
+}
+function localIngestionTime(value) {
+  return value ? new Date(value).toLocaleString(undefined, {dateStyle:"medium", timeStyle:"short"}) : null;
+}
+let ingestionInFlight = false;
+let ingestionError = "";
+function ingestionEmptyState(last) {
+  const guidance = ingestionGuidance(last, STATE.filters.start, STATE.filters.end);
+  return `<p class="discussion-note">No discussions match the selected filters.</p>${guidance ? `<div class="discussion-note"><p>${escapeHtml(guidance)}</p><button class="btn" id="d-refresh-usage"${ingestionInFlight ? " disabled" : ""}>${ingestionInFlight ? "Refreshing usage…" : "Refresh usage"}</button></div>` : ""}`;
+}
 async function loadDiscussions(reset = true) {
   if (reset) discussionOffset = 0;
   const request = ++discussionRequest;
@@ -1196,13 +1221,14 @@ async function loadDiscussions(reset = true) {
     const d = await api("/api/discussions" + queryString({sort: $("#d-sort").value, direction: $("#d-direction").value, include_children: $("#d-children").value,
       search: discussionSearch, pricing: $("#d-pricing").value, view: $("#d-view").value, limit: discussionLimit, offset: discussionOffset}));
     if (request !== discussionRequest) return;
-    $("#d-freshness").textContent = `Last successful ingestion: ${fmt.date(d.last_successful_ingestion)} · ${fmt.n(d.unattached_sessions)} unattached agents${d.title_metadata_available ? "" : " · title metadata unavailable; fallback names shown"}`;
+    $("#d-freshness").textContent = `${d.last_successful_ingestion ? "Last successful ingestion: " + localIngestionTime(d.last_successful_ingestion) : "No successful ingestion recorded."} · ${fmt.n(d.unattached_sessions)} unattached agents${d.title_metadata_available ? "" : " · title metadata unavailable; fallback names shown"}`;
     const restoreSearchFocus = document.activeElement === discussionSearchInput;
     const selection = discussionSearchInput ? [discussionSearchInput.selectionStart, discussionSearchInput.selectionEnd] : null;
     content.innerHTML = `<table class="discussion-table"><thead><tr>${discussionSortHeader("rank", "Rank", true)}${discussionSortHeader("title", "Discussion")}${discussionSortHeader("activity", "Activity")}${discussionSortHeader("tokens", "Tokens", true)}${discussionSortHeader("cost", "Est. cost", true)}${discussionSortHeader("subagents", "Subagents", true)}</tr></thead><tbody>${d.discussions.map(r => `<tr>
       <td class="num discussion-rank" data-label="Rank">${fmt.n(r.rank)}</td><td><button class="discussion-link" data-discussion="${escapeHtml(r.id)}">${escapeHtml(r.title)}</button><span class="discussion-meta prompt-preview-slot" data-preview="${escapeHtml(r.id)}">Loading first prompt…</span>${r.relationship_issue ? `<span class="discussion-warning">${escapeHtml(r.relationship_issue.replaceAll("_", " "))}</span>` : ""}</td>
       <td data-label="Activity">${fmt.date(r.started_at).slice(0,10)}<br>${fmt.date(r.ended_at).slice(0,10)}</td>
-      <td class="num" data-label="Tokens">${fmt.n(r.total_tokens)}</td><td class="num cost" data-label="Est. cost">${discussionCost(r)}</td><td class="num" data-label="Subagents">${fmt.n(r.child_count)}</td></tr>`).join("")}</tbody></table>${d.discussions.length ? "" : '<p class="discussion-note">No discussions match these filters.</p>'}`;
+      <td class="num" data-label="Tokens">${fmt.n(r.total_tokens)}</td><td class="num cost" data-label="Est. cost">${discussionCost(r)}</td><td class="num" data-label="Subagents">${fmt.n(r.child_count)}</td></tr>`).join("")}</tbody></table>${d.discussions.length ? "" : ingestionEmptyState(d.last_successful_ingestion)}`;
+    $("#d-refresh-usage")?.addEventListener("click", reingest);
     mountDiscussionSearch();
     if (restoreSearchFocus) {
       discussionSearchInput.focus({preventScroll:true});
@@ -1336,7 +1362,9 @@ async function openDiscussion(id) {
   $("#dd-content").textContent = "Loading…";
   dialog.showModal();
   try {
-    const report = await api(`/api/discussions/${encodeURIComponent(id)}?include_children=${$("#d-children").value}`);
+    const params = new URLSearchParams({include_children: $("#d-children").value});
+    for (const key of ["start", "end"]) if (STATE.filters[key]) params.set(key, STATE.filters[key]);
+    const report = await api(`/api/discussions/${encodeURIComponent(id)}?${params}`);
     const d = report.discussion;
     $("#dd-title").textContent = d.title;
     $("#dd-content").innerHTML = `<p class="discussion-note">${escapeHtml(d.tool)} · ${escapeHtml(d.originator || "unknown originator")} · ${escapeHtml(d.project || "unknown project")}<br>${fmt.date(d.started_at)} → ${fmt.date(d.ended_at)}</p>
@@ -1359,18 +1387,32 @@ async function refresh() {
 }
 
 async function reingest() {
+  if (ingestionInFlight) return;
+  ingestionInFlight = true;
+  ingestionError = "";
   const btn = $("#reingest");
-  btn.disabled = true;
   const orig = btn.textContent;
-  btn.textContent = "re-ingesting…";
+  const setBusy = busy => {
+    btn.disabled = busy;
+    const inline = $("#d-refresh-usage");
+    if (inline) { inline.disabled = busy; inline.textContent = busy ? "Refreshing usage…" : "Refresh usage"; }
+  };
+  const status = $("#d-refresh-status");
+  status.textContent = "Refreshing usage…";
+  setBusy(true);
+  btn.textContent = "Refreshing usage…";
   try {
     const r = await api("/api/reingest", { method: "POST" });
-    btn.textContent = `+${r.messages_added} msgs / ${r.elapsed_sec}s`;
+    if (r.error) throw new Error("Ingestion failed");
     await refresh();
-    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
+    status.textContent = "Usage refreshed.";
   } catch (e) {
-    btn.textContent = "failed";
-    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
+    ingestionError = "Usage refresh failed. Try again.";
+    status.textContent = ingestionError;
+  } finally {
+    ingestionInFlight = false;
+    setBusy(false);
+    btn.textContent = orig;
   }
 }
 
@@ -1421,7 +1463,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#d-next").addEventListener("click", () => { discussionOffset += discussionLimit; loadDiscussions(false); });
   $("#dd-close").addEventListener("click", () => $("#discussion-dialog").close());
   $("#apply").addEventListener("click", refresh);
+  ["#f-start", "#f-end"].forEach(id => $(id).addEventListener("input", () => {
+    STATE.filters._rangePreset = false;
+    $$(".btn.range").forEach(b => b.classList.remove("active"));
+  }));
   $("#reset").addEventListener("click", () => {
+    STATE.filters._rangePreset = false;
     clearTimeout(discussionSearchTimer); discussionSearch = "";
     if (discussionSearchInput) discussionSearchInput.value = "";
     $("#f-tool").value = ""; $("#f-model").value = ""; $("#f-project").value = "";

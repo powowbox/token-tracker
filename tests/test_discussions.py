@@ -55,9 +55,9 @@ class DiscussionTests(unittest.TestCase):
         self.assertEqual(sum(r["total_tokens"] for r in d["by_model"]),500)
         self.assertEqual(self.report(include_children=False)["discussions"][0]["total_tokens"],250)
 
-    def test_filters_select_without_truncating_lifetime(self):
+    def test_filters_count_only_selected_period(self):
         main=self.session("main"); self.usage(main); self.usage(main, model="model-b",ts="2026-09-01T12:00:00Z")
-        self.assertEqual(self.report(start="2026-09-01",model="model-b")["discussions"][0]["total_tokens"],250)
+        self.assertEqual(self.report(start="2026-09-01",model="model-b")["discussions"][0]["total_tokens"],125)
         self.assertEqual(self.report(start="2026-09-02")["total"],0)
         self.assertEqual(self.report(start="2026-09-01",model="model-a")["total"],0)
         self.assertEqual(self.report(project="/missing")["total"],0)
@@ -247,3 +247,29 @@ class DiscussionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PeriodDiscussionTests(unittest.TestCase):
+    setUp = DiscussionTests.setUp
+    session = DiscussionTests.session
+    usage = DiscussionTests.usage
+    report = DiscussionTests.report
+    def test_period_reorders_and_matches_detail_with_children(self):
+        a=self.session("a"); b=self.session("b"); child=self.session("child","subagent","a")
+        self.usage(a, fresh=10000, cost=None, ts="2026-08-31T21:59:59Z")
+        self.usage(a, fresh=10, ts="2026-09-01T00:00:00+02:00")
+        self.usage(child, fresh=20, ts="2026-09-01T12:00:00Z")
+        self.usage(b, fresh=300, ts="2026-09-01T12:00:00Z")
+        self.usage(b, fresh=10000, ts="2026-09-02T00:00:00Z")
+        period=dict(start="2026-08-31T22:00:00Z",end="2026-09-01T21:59:59.999Z")
+        rows=self.report(**period)["discussions"]
+        self.assertEqual([r["id"] for r in rows],[b,a])
+        self.assertEqual(rows[1]["total_tokens"],80)
+        self.assertEqual(rows[1]["pricing_status"],"complete")
+        detail=self.report(discussion_id=a,**period)["discussions"][0]
+        self.assertEqual(detail["total_tokens"],rows[1]["total_tokens"])
+        self.assertEqual(detail["main"]["total_tokens"]+detail["children"]["total_tokens"],80)
+        self.assertEqual(self.report(include_children=False,**period)["discussions"][1]["total_tokens"],35)
+        self.assertGreater(self.report(discussion_id=a)["discussions"][0]["total_tokens"],10000)
+        self.assertEqual(self.report(start="2030-01-01")["total"],0)
+        self.assertEqual(self.report(**period)["totals_scope"],"selected_period_imported_usage")

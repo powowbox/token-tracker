@@ -57,7 +57,7 @@ lightweight per-prompt reporting instructions in `AGENTS.md`.
 
 ## Discussion leaderboard — 2026-09-06
 
-**Top discussions by usage** ranks complete discussions using lifetime usage from
+**Top discussions by usage** ranks discussions using usage in the selected period from
 `tokens.db`, with Codex discussion titles and verified subagents included by default.
 Click a title to compare main/child usage, models, token categories and pricing coverage.
 The separate Rank column keeps each discussion’s token-based rank when sorting by
@@ -77,7 +77,7 @@ are labeled explicitly. Project and model information remains in the detail view
 - **Previously:** session breakdowns displayed independent sessions and totals within the selected period.
 - **Now:** the discussion leaderboard groups explicitly linked child sessions and automatic reviews, without counting Claude's already-grouped subagents twice.
 - Titles use Codex `thread_name`, then `threads.name`; missing titles fall back to project/date. Prompt text is never used as a title fallback.
-- Date and model filters select discussions while preserving their lifetime totals. Choose main-only usage, pricing coverage, or unattached agents; sort by tokens, known estimated cost, fresh input or output.
+- Date filters restrict tokens, estimated costs and ranking to the selected period, including the detail view. All uses the complete imported history. Model filters select matching discussions. Choose main-only usage, pricing coverage, or unattached agents; sort by tokens, known estimated cost, fresh input or output.
 - Unknown costs stay **partial** or **unavailable**. The last successful ingestion is shown; opening the leaderboard does not re-ingest logs.
 
 No database migration or rebuild is needed. Restart an existing server after updating

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=prompt-search5">
+  <link rel="stylesheet" href="/static/styles.css?v=discussion-white9">
 </head>
 <body>
   <header>
@@ -70,7 +70,8 @@
       <label>pricing <select id="d-pricing"><option value="">all</option><option value="complete">complete</option><option value="partial">partial</option><option value="unavailable">unavailable</option></select></label>
       <label>view <select id="d-view"><option value="discussions">discussions</option><option value="unattached">unattached agents</option></select></label>
     </div>
-    <p class="discussion-note">Rank is based on total tokens and stays unchanged when sorting. Lifetime totals for discussions matching the filters above. Date filters select activity; they do not shorten the totals. Costs are API estimates.</p>
+    <p class="discussion-note">Rank is based on total tokens and stays unchanged when sorting. Tokens, costs and rank use only the selected period. All shows the complete imported history. Costs are API estimates.</p>
+    <p id="d-refresh-status" class="discussion-note" role="status" aria-live="polite"></p>
     <p id="d-freshness" class="discussion-note"></p>
     <div id="d-content" aria-live="polite">Loading discussions…</div>
     <div class="discussion-pages"><button class="btn" id="d-prev" disabled>previous</button><span id="d-page" aria-live="polite"></span><button class="btn" id="d-next" disabled>next</button></div>
@@ -137,6 +138,6 @@
     <span id="last-run" class="muted"></span>
   </footer>
 
-  <script src="/static/app.js?v=prompt-search5"></script>
+  <script src="/static/app.js?v=discussion-white9"></script>
 </body>
 </html>

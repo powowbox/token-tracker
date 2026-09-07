@@ -12,8 +12,8 @@ included in output. Each model's stored per-message estimate is preserved, inclu
 mixed-model discussions. No model-family fallback pricing is introduced.
 
 The date, source, project, model, agent and entrypoint filters select discussions
-having a matching imported usage record; totals then include their full imported
-lifetime within the chosen main-only/include-children scope. A model filter therefore
+having a matching imported usage record; totals then include only usage within the selected dates and the chosen
+main-only/include-children scope. Without date bounds, totals include the full imported history. A model filter therefore
 does not remove other models from a matching discussion. Multiple filters must match
 the same record. The separate **Rank** column is computed by total tokens descending within the filtered
 selection, with stable ID tie-breaking. It does not change when sorting or paging;
@@ -134,7 +134,7 @@ hover/keyboard/touch, long text, HTML treated literally, failures and stale requ
 |---|---|
 | `tool` | `codex`, `claude`; all by default |
 | `project`, `model`, `agent`, `entrypoint` | Exact matches; `agent=main` selects main usage |
-| `start`, `end` | ISO dates/timestamps; selects activity, keeps lifetime totals |
+| `start`, `end` | ISO dates/timestamps; restricts usage totals and rank to the selected period |
 | `include_children` | `true` (default), `false` |
 | `view` | `discussions` (default), `unattached` |
 | `pricing` | `complete`, `partial`, `unavailable`; all by default |
@@ -149,7 +149,7 @@ Costs use `known_cost` with an explicit `pricing_status`.
 
 `GET /api/discussions/{source-qualified-root-id}?include_children=true`
 
-Returns lifetime totals, main/child totals, model breakdown and included session
+Accepts optional `start` and `end` with the same validation as the list. Returns selected-period totals (full history without dates), main/child totals, model breakdown and included session
 metadata. Use the root ID returned by the list endpoint. Unknown/non-root IDs return
 404; invalid filters or pagination return 422. Reads use a consistent SQLite read
 transaction. Aggregates run in SQL; raw messages are not returned.
@@ -158,7 +158,7 @@ transaction. Aggregates run in SQL; raw messages are not returned.
 
 Run `python -m unittest discover -s tests -q` in the project environment.
 Focused fixtures cover mixed models, reasoning overlap, full trees, duplicate links,
-cycles, missing/conflicting parents, Claude children, lifetime filters, title priority
+cycles, missing/conflicting parents, Claude children, period filters, title priority
 and renames, unavailable metadata, unknown/zero prices, pagination and API validation.
 The complete suite passed 77 tests after the first-prompt preview addition.
 
@@ -171,3 +171,14 @@ There is **no schema migration, rebuild, or snapshot format change**. Restart th
 server after updating; refresh the browser. Existing ingestion and agent snapshot
 workflows remain separate. No personal installation paths or credentials are needed
 in repository configuration.
+
+## Empty results and ingestion freshness
+
+The leaderboard shows the last successful ingestion in the browser's local timezone.
+When no discussions match, it offers Refresh usage if ingestion is absent or does not
+cover the selected interval. Ongoing periods allow a five-minute freshness tolerance.
+A warning indicates potentially missing data, not a promise of matching activity.
+Refresh usage invokes the existing ingestion operation, prevents duplicate clicks,
+keeps filters and reloads the dashboard. Failures retain the last successful timestamp
+and show a retry message. Run `node --test tests/test_ingestion_guidance.cjs` for
+the freshness boundary checks.

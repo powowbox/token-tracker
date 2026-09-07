@@ -23,7 +23,7 @@ The helper provides session totals, top models/MCP tools, source kinds, baseline
 
 Use explicit parent links from supported metadata when grouping Codex children; see the installed tracker/discussions.py and docs/DISCUSSIONS.md. Claude messages can already include child agents in one session: distinguish agent_id/agent_type and never add those child logs again. Project cwd aliases/worktrees require confirmed membership. Report unmatched children and aliases, not speculative links.
 
-The /api/discussions date filter selects discussions but preserves lifetime totals: do not use its totals as period consumption. /api/discussion-previews only exposes first prompts, not full prompt histories.
+The /api/discussions date filter restricts totals and rank to period consumption; without dates it returns lifetime totals. Older installations used lifetime totals even with dates: check totals_scope before relying on the API. /api/discussion-previews only exposes first prompts, not full prompt histories.
 
 messages does not store user prompt text or universal turn IDs. For selected Codex logs tracker/prompt_usage.py read_turns exposes boundary=explicit/approximate and unmatched rows. It reparses whole selected files and may recompute prices using current rates: use it cautiously, disclose differences, prefer stored message costs joined by source_file/source_line. Retain bounded archive scans and fail explicitly on truncation. Multiple user steering messages can share a turn; do not charge its full usage to each message. Use existing first_prompts.py cleaning rules where relevant, without assuming first-prompt extraction enumerates all prompts. Do not copy cached priorConversation prompts into the current session's human prompt list.
 
