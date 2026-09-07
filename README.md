@@ -28,6 +28,21 @@ Provider dashboards help track account limits, API spending or organization-wide
 
 Estimated costs are API-equivalent comparisons, not invoices or subscription quota measurements. Results depend on the available logs; MCP text-size estimates are not billed token counts. Prompt reports measure newly logged usage for the selected session between two snapshots; they exclude separate agent sessions and the final answer generated after the measurement.
 
+### Platform compatibility
+
+> **macOS:** the primary tested platform. Validation covers the automated test
+> suite, dashboard browser checks, ingestion of real local logs, and the macOS
+> server service workflow.
+>
+> **Linux:** console operation has been tested in a Linux container. The automatic
+> startup and scheduled-ingestion installers use macOS launchd and do not work on
+> Linux; no systemd or cron installer is supplied. See [Linux setup](#macos-and-linux).
+>
+> **Windows:** the 82 Python tests pass with the SQLite cleanup fix, but native
+> dashboard startup and ingestion of real Windows agent logs are not yet confirmed.
+> Use the PowerShell commands instead of Make targets or Bash scripts. No Windows
+> service or Task Scheduler installer is supplied. See [Windows setup](#windows-powershell).
+
 ![token-tracker dashboard](docs/dashboard.png)
 
 ## Project token audit skill
@@ -93,19 +108,52 @@ This release includes the Codex accounting repair, partial-cost dashboard and ag
 
 Copy the [token usage instructions](docs/AGENTS_TOKEN_USAGE.md) into your agent’s `AGENTS.md` for snapshot-based reporting, stop/resume controls and non-blocking error handling. No separate skill is required.
 
-### Changes 
+### Changes
 
-| Area | Previous behavior | Corrected behavior |
-|------|-------------------|--------------------| 
-| Token accounting | Repeated events could count the same consumption again. | Reconciles cumulative counters with last-step usage; unchanged totals add no consumption. |
-| Incremental ingestion | Counter state and pending MCP results could be lost between imports. | Replays the imported prefix to restore state; unchanged files add no usage or duplicate calls. Resets, resumes, compaction and missing fields are handled explicitly. |
-| Token categories | Overlapping counters could inflate estimates. | Fresh input excludes cached input; reasoning is already included in output. Cache writes remain a subset of fresh input. |
-| MCP coverage | Newer and namespaced call formats were missed. | Supports legacy/custom calls and outputs, namespaced calls, `mcp_tool_call_end` and completed/failed `item_completed` MCP records. Counts execution evidence and deduplicates by source file and call ID. |
-| MCP result sizes | Payload size could be mistaken for billed tokens. | Tracks text size, media counts and reported tool/transport errors separately. Text tokens are explicitly estimated as characters ÷ 4; image/audio/base64 payloads are excluded from that estimate. |
-| Model pricing | Unknown models, including GPT-5.6 Sol, could silently inherit default rates. | Uses verified explicit model rates and aliases. Unknown prices preserve tokens and remain unpriced. |
-| Session attribution | Generic source labels could misidentify JetBrains; final-model attribution could misprice earlier steps. | Preserves originator/source, distinguishes user sessions, guardian reviews and subagents, and retains model/reasoning effort per usage step. |
-| Dashboard costs | Any unpriced usage could make the main total unavailable. | Shows the known API-equivalent subtotal with “Partial estimate · N unpriced steps excluded.” A wholly unpriced selection still shows “Unpriced.” |
-| Small screens | Summary cards and pricing notes were clipped. | Cards use two columns on narrow screens and pricing notes wrap. |
+#### Token accounting
+
+- **Previously:** Repeated events could count the same consumption again.
+- **Now:** Reconciles cumulative counters with last-step usage; unchanged totals add no consumption.
+
+#### Incremental ingestion
+
+- **Previously:** Counter state and pending MCP results could be lost between imports.
+- **Now:** Replays the imported prefix to restore state; unchanged files add no usage or duplicate calls. Resets, resumes, compaction and missing fields are handled explicitly.
+
+#### Token categories
+
+- **Previously:** Overlapping counters could inflate estimates.
+- **Now:** Fresh input excludes cached input; reasoning is already included in output. Cache writes remain a subset of fresh input.
+
+#### MCP coverage
+
+- **Previously:** Newer and namespaced call formats were missed.
+- **Now:** Supports legacy/custom calls and outputs, namespaced calls, `mcp_tool_call_end` and completed/failed `item_completed` MCP records. Counts execution evidence and deduplicates by source file and call ID.
+
+#### MCP result sizes
+
+- **Previously:** Payload size could be mistaken for billed tokens.
+- **Now:** Tracks text size, media counts and reported tool/transport errors separately. Text tokens are explicitly estimated as characters ÷ 4; image/audio/base64 payloads are excluded from that estimate.
+
+#### Model pricing
+
+- **Previously:** Unknown models, including GPT-5.6 Sol, could silently inherit default rates.
+- **Now:** Uses verified explicit model rates and aliases. Unknown prices preserve tokens and remain unpriced.
+
+#### Session attribution
+
+- **Previously:** Generic source labels could misidentify JetBrains; final-model attribution could misprice earlier steps.
+- **Now:** Preserves originator/source, distinguishes user sessions, guardian reviews and subagents, and retains model/reasoning effort per usage step.
+
+#### Dashboard costs
+
+- **Previously:** Any unpriced usage could make the main total unavailable.
+- **Now:** Shows the known API-equivalent subtotal with “Partial estimate · N unpriced steps excluded.” A wholly unpriced selection still shows “Unpriced.”
+
+#### Small screens
+
+- **Previously:** Summary cards and pricing notes were clipped.
+- **Now:** Cards use two columns on narrow screens and pricing notes wrap.
 
 ### How to read the cost display
 
@@ -263,13 +311,76 @@ input from cached input so the two tools line up on the same axes.
 
 ## Quick start
 
-Requires [uv](https://docs.astral.sh/uv/).
+Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Run the commands below from a cloned copy of this repository. `uv sync` creates
+an isolated environment and can download a compatible Python if needed. Use a
+writable directory: the application creates its SQLite databases beside the source.
+
+### macOS and Linux
 
 ```sh
 uv sync                                   # create .venv + install deps
-make ingest                               # first run
-make server                               # http://127.0.0.1:8732
+uv run python -m tracker.ingest            # first import
+uv run python -m uvicorn tracker.api:app --host 127.0.0.1 --port 8732
 ```
+
+With Bash and Make installed, `make ingest` and `make server` are also available.
+`make server` enables development auto-reload; the direct command above does not.
+
+**Linux background operation:** the included service installers use macOS launchd.
+Do not use `make agent`, `make up`, `make down`, `make logs` or the
+`make server-*` service targets on Linux. No systemd units or cron installer are
+currently supplied. To configure these yourself, run the server command above as
+one service and ingestion as a separate scheduled job, using the repository as the
+working directory and the user account that owns the agent logs.
+
+### Windows (PowerShell)
+
+Install uv using WinGet:
+
+```powershell
+winget install --id=astral-sh.uv -e
+```
+
+Close and reopen PowerShell, check `uv --version`, then run from the repository:
+
+```powershell
+uv sync
+uv run python -X utf8 -m tracker.ingest
+uv run python -X utf8 -m uvicorn tracker.api:app --host 127.0.0.1 --port 8732
+```
+
+Use these commands instead of the Make targets or `.sh` scripts: those assume
+Bash and Unix virtual-environment paths. `-X utf8` ensures UTF-8 for text reads
+regardless of the Windows locale. No PowerShell execution-policy change is needed
+for these startup commands.
+
+**Windows background operation:** the supplied macOS service commands do not work
+on Windows. No Windows service or Task Scheduler installer is currently supplied.
+If configuring Task Scheduler yourself, use the same Windows user that owns the
+logs and set the repository as the working directory. Schedule ingestion separately
+from the HTTP server. A native Windows environment and WSL have different home
+folders; run the tracker where the relevant agent logs are accessible.
+
+### Open the dashboard and keep data current
+
+Open **http://127.0.0.1:8732/** in a browser on the machine running the server.
+For a Windows VM, use the browser inside Windows. Keep the server terminal open;
+Ctrl+C stops it. Binding to `127.0.0.1` makes it accessible only locally.
+
+Starting the server does not ingest logs automatically. Run the ingestion command
+again, click **re-ingest** (or **Refresh usage** in the empty leaderboard), or set
+up a separate ingestion schedule. An empty dashboard is expected if that user has
+no supported agent logs. Default log locations are listed under [Data sources](#data-sources).
+
+### Platform validation
+
+Linux installation, 82 Python tests, ingestion with no source logs, and HTTP/API/static
+asset responses were verified in a disposable Python 3.12 Linux container. A user
+confirmed all 82 Python tests pass on Windows 11 with Python 3.14 after the SQLite
+test-cleanup fix. Native Windows dashboard startup and ingestion of real Windows
+agent logs have not yet been confirmed. These checks do not validate automatic
+service installation on Linux or Windows.
 
 ## Periodic ingest (macOS launchd)
 
@@ -292,7 +403,7 @@ want to wait.
 
 ### Note for humans and AI coding agents
 
-If you want this server or the ingest job to run in the background, **use the supplied
+On macOS, if you want this server or the ingest job to run in the background, **use the supplied
 installer above.** Do not use `launchctl submit` to register it ad-hoc. `launchctl submit`
 is a legacy interface that registers a launchd job without writing a plist to disk; many
 EDR products (Microsoft Defender for Endpoint, etc.) flag it as suspicious because
@@ -311,7 +422,12 @@ not detect which method is currently in use.
 ### Console-launched server
 
 Stop the server with Ctrl+C in the console that launched it. From the Token Tracker
-project directory, run `make server` (or `./scripts/run-server.sh`) again. Keep that
+project directory, restart with the command for your platform:
+
+- macOS/Linux: `uv run python -m uvicorn tracker.api:app --host 127.0.0.1 --port 8732`
+- Windows PowerShell: `uv run python -X utf8 -m uvicorn tracker.api:app --host 127.0.0.1 --port 8732`
+
+On macOS/Linux with Bash and Make, `make server` is also available. Keep the
 console open. Verify `GET /api/health` responds successfully after restart.
 
 ### Service-managed server (macOS)
