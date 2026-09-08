@@ -38,11 +38,13 @@ uv run python -m uvicorn tracker.api:app --host 127.0.0.1 --port 8732
 
 ### Windows (PowerShell)
 
-Install uv, then close and reopen PowerShell:
+Install uv once, then reopen PowerShell:
 
 ```powershell
 winget install --id=astral-sh.uv -e
 ```
+
+Run without Make:
 
 ```powershell
 uv sync
@@ -50,13 +52,12 @@ uv run python -X utf8 -m tracker.ingest
 uv run python -X utf8 -m uvicorn tracker.api:app --host 127.0.0.1 --port 8732
 ```
 
-`-X utf8` keeps text reads consistent across Windows locales. Native Windows and
-WSL have different home folders; use the environment containing your agent logs.
+`-X utf8` ensures consistent text decoding. Run in Windows or WSL according to where your agent logs are stored.
 
 ### Make shortcuts
 
-With GNU Make installed, three targets wrap the commands above and work on macOS,
-Linux and Windows:
+With **uv and GNU Make already installed**, these shortcuts work on all three platforms.
+`make setup` installs project dependencies, not uv; Make is optional and is not included with Windows.
 
 - `make setup`: `uv sync` plus an editable install.
 - `make ingest`: run the ingestion.
@@ -74,9 +75,6 @@ interpreter on each platform. Override `PYTHON` if needed; on Windows, for examp
 ```powershell
 make ingest PYTHON="uv run python -X utf8"
 ```
-
-Start the server with `make server` or the direct commands above; no Bash launcher
-is needed.
 
 The other targets (`agent`, `up`, `down`, `logs`, and the `server-service` family)
 are macOS-only. `make up` enables scheduled ingestion and starts the console server.
