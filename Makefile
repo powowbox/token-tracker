@@ -1,17 +1,28 @@
 .PHONY: setup ingest server agent up down logs
 
+# `uv run` is the only interpreter spelling that works everywhere: the venv holds
+# bin/python on Unix and Scripts/python.exe on Windows, and a relative path with
+# forward slashes is not a runnable command under cmd.exe.
+PYTHON ?= uv run python
+HOST ?= 127.0.0.1
+PORT ?= 8732
+# --reload watches tracker/ and web/ so editing source rebuilds the running process.
+# Set RELOAD=0 to opt out (e.g. when running under launchd).
+RELOAD ?= 1
+RELOAD_FLAGS := $(if $(filter 0,$(RELOAD)),,--reload --reload-dir tracker --reload-dir web)
+
 setup:
 	uv sync
 	uv run pip install -e .
 
 ingest:
-	.venv/bin/python -m tracker.ingest -v
+	$(PYTHON) -m tracker.ingest -v
 
 agent:
 	./scripts/install-launchagent.sh
 
 server:
-	./scripts/run-server.sh
+	$(PYTHON) -m uvicorn tracker.api:app --host $(HOST) --port $(PORT) $(RELOAD_FLAGS)
 
 # Ensure the periodic-ingest launchd agent is loaded, then serve the UI.
 up: agent server

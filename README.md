@@ -16,7 +16,7 @@ costs and project-specific optimization opportunities.
 
 - **macOS:** primary tested platform, including real-log ingestion, dashboard and server service operation.
 - **Linux:** console operation tested in a Linux container. Automatic service installation is not supplied.
-- **Windows:** Python tests pass; native dashboard startup and real-log ingestion remain unconfirmed. Use PowerShell commands, not Make or Bash scripts.
+- **Windows:** Python tests pass; native dashboard startup and real-log ingestion remain unconfirmed. Use the PowerShell commands below, or the cross-platform Make shortcuts; the bundled `.sh` scripts need a POSIX shell.
 
 The included background-service installers are **macOS-only**.
 
@@ -52,6 +52,20 @@ uv run python -X utf8 -m uvicorn tracker.api:app --host 127.0.0.1 --port 8732
 
 `-X utf8` keeps text reads consistent across Windows locales. Native Windows and
 WSL have different home folders; use the environment containing your agent logs.
+
+### Make shortcuts
+
+With GNU Make installed, three targets wrap the commands above and work on macOS,
+Linux and Windows:
+
+- `make setup`: `uv sync` plus an editable install.
+- `make ingest`: run the ingestion.
+- `make server`: serve the dashboard, **with `--reload`** so editing the source
+  restarts the process. Set `RELOAD=0` for the same behaviour as the plain commands
+  above, or `HOST=... PORT=...` to move the listener.
+
+The other targets (`agent`, `down`, `logs`, and the `server-service` family) call
+shell scripts or launchd and are macOS-only.
 
 Open **http://127.0.0.1:8732/** on the machine running the server and keep its terminal
 open. In a VM, use the browser inside the VM.
