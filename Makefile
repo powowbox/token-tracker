@@ -1,4 +1,4 @@
-.PHONY: setup ingest server agent up down logs
+.PHONY: setup ingest server open agent up down logs
 
 # `uv run` is the only interpreter spelling that works everywhere: the venv holds
 # bin/python on Unix and Scripts/python.exe on Windows, and a relative path with
@@ -23,6 +23,9 @@ agent:
 
 server:
 	$(PYTHON) -m uvicorn tracker.api:app --host $(HOST) --port $(PORT) $(RELOAD_FLAGS)
+
+open:
+	$(PYTHON) -m webbrowser "http://$(HOST):$(PORT)/"
 
 # Ensure the periodic-ingest launchd agent is loaded, then serve the UI.
 up: agent server
