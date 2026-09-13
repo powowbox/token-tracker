@@ -62,7 +62,6 @@ With **uv and GNU Make already installed**, these shortcuts work on all three pl
 - `make setup`: `uv sync` plus an editable install.
 - `make ingest`: run the ingestion.
 - `make open`: open the tracker page in your default browser (start the server first).
-  Override `HOST` or `PORT` when needed, for example `make open PORT=8733`.
 - `make server`: serve the dashboard, **with `--reload`** so editing the source
   restarts the process. Set `RELOAD=0` for the same behaviour as the plain commands
   above. Reload watches `tracker/` and `web/`. Override `HOST` or `PORT` when needed.
@@ -88,27 +87,9 @@ open. In a VM, use the browser inside the VM.
 
 ### Shell shortcut (macOS and Linux)
 
-From the repository directory, install the `token-tracker` alias, then activate it
-in your current terminal. For the default Zsh configuration on macOS:
-
-```sh
-./install.sh
-source ~/.zshrc
-token-tracker
-```
-
-For Bash or a custom `ZDOTDIR`, use the exact `source` command printed by the
-installer. Use `~/.zshrc`, not `source .zshrc`: the configuration file is in your
-home directory. If `token-tracker` reports `command not found`, run the installer
-and its printed `source` command in the terminal where you want to use the alias.
-
-Once activated, `token-tracker` opens the dashboard from any directory. The server
-must already be running. You can pass Make overrides, for example
-`token-tracker PORT=8733`.
-
-The installer uses `.zshrc` (respecting `ZDOTDIR`) for Zsh and `.bashrc` for Bash;
-on macOS, Bash uses its login configuration file. Re-running the installer updates
-its existing alias block. It does not install dependencies or start the server.
+Run `./install.sh` to detect your default shell (Bash/Zsh) and add the alias.
+Run the printed `source` command, then `token-tracker` to open the dashboard.
+The server must already be running.
 
 Select a project and period to explore consumption. The leaderboard and its details
 count only usage inside that period; **All** uses the complete imported history.

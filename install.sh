@@ -4,16 +4,11 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
-# Prefer the invoking shell; SHELL is the fallback for launchers and subprocesses.
-CURRENT_SHELL="$(ps -p "$PPID" -o comm= 2>/dev/null || true)"
-CURRENT_SHELL="${CURRENT_SHELL##*/}"
-CURRENT_SHELL="${CURRENT_SHELL#-}"
-case "$CURRENT_SHELL" in
-  bash|zsh) ;;
-  *) CURRENT_SHELL="${SHELL:-unknown}"; CURRENT_SHELL="${CURRENT_SHELL##*/}" ;;
-esac
+# SHELL identifies the user's default login shell, regardless of the invoking shell.
+DEFAULT_SHELL="${SHELL:-unknown}"
+DEFAULT_SHELL="${DEFAULT_SHELL##*/}"
 
-case "$CURRENT_SHELL" in
+case "$DEFAULT_SHELL" in
   zsh) CONFIG_FILE="${ZDOTDIR:-$HOME}/.zshrc" ;;
   bash)
     CONFIG_FILE="$HOME/.bashrc"
@@ -27,7 +22,7 @@ case "$CURRENT_SHELL" in
       fi
     fi
     ;;
-  *) printf 'Unsupported shell: %s (supported: bash, zsh)\n' "$CURRENT_SHELL" >&2; exit 1 ;;
+  *) printf 'Unsupported default shell: %s (supported: bash, zsh)\n' "$DEFAULT_SHELL" >&2; exit 1 ;;
 esac
 
 # Quote twice: once for the command path, then for the alias definition.
