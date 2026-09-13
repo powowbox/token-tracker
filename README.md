@@ -83,12 +83,15 @@ are macOS-only. `make up` enables scheduled ingestion and starts the console ser
 Open **http://127.0.0.1:8732/** on the machine running the server and keep its terminal
 open. In a VM, use the browser inside the VM.
 
+Run `./install.sh` to detect your default shell (Bash/Zsh) and add the alias.
+Run the printed `source` command.
+
 ## Usage
 
 ### Shell shortcut (macOS and Linux)
 
-Run `./install.sh` to detect your default shell (Bash/Zsh) and add the alias.
-Run the printed `source` command, then `token-tracker` to open the dashboard.
+Run `token-tracker` to open the dashboard.
+
 The server must already be running.
 
 Select a project and period to explore consumption. The leaderboard and its details
