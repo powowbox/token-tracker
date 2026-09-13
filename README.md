@@ -83,7 +83,7 @@ are macOS-only. `make up` enables scheduled ingestion and starts the console ser
 Open **http://127.0.0.1:8732/** on the machine running the server and keep its terminal
 open. In a VM, use the browser inside the VM.
 
-Run `./install.sh` to detect your default shell (Bash/Zsh) and add the alias.
+Run `./install.sh` to detect your default shell (Bash/Zsh) and add the alias `token-tracker`.
 Run the printed `source` command.
 
 ## Usage
