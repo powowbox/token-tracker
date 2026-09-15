@@ -101,8 +101,34 @@ count only usage inside that period; **All** uses the complete imported history.
 or rerun the ingestion command. The leaderboard shows the last successful ingestion
 and guidance when empty results may be caused by stale data.
 
-Default sources: `~/.codex/sessions/` and `~/.claude/projects/`. No supported logs means
-an empty dashboard. Generated SQLite databases remain in the repository directory.
+### Session sources
+
+Edit `sources.json` in the installation directory to configure Codex homes:
+
+```json
+{
+  "codex_homes": ["~/.codex", "~/.codex-deepseek"]
+}
+```
+
+Each home is scanned under `sessions/YYYY/MM/DD/*.jsonl`. `~` is expanded;
+relative homes resolve against the configuration directory, not the shell directory.
+The configuration is reread on every ingestion and usage-snapshot lookup, so edits
+need no restart. Click **re-ingest** to import added sources. Missing homes are
+skipped, duplicate paths/symlink aliases are scanned once, and an empty list disables
+Codex discovery. Invalid configuration raises an error rather than silently omitting data.
+If `sources.json` is absent, the historical `~/.codex/sessions/` source is used.
+Claude continues to use `~/.claude/projects/`. Removing a source does not delete
+previously imported records. No supported logs means an empty dashboard.
+Generated SQLite databases remain in the repository directory.
+
+`prices.json` includes `deepseek-flash` at current **peak** API-equivalent rates:
+$0.30 fresh input, $0.006 cached input, and $1.20 output per million tokens.
+[DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/), verified
+2026-09-15, lists off-peak rates at half these amounts. Peak hours are Monday-Friday
+01:00-04:00 and 06:00-10:00 UTC. The tracker uses a fixed peak estimate, not
+time-dependent billing; off-peak rates and the schedule are recorded in the price
+entry for reference. Existing GPT rates and calculation rules are unchanged.
 
 ### Report usage in the agent’s chat
 

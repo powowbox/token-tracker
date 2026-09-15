@@ -1,4 +1,4 @@
-"""Parse ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl files.
+"""Parse configured Codex homes: sessions/YYYY/MM/DD/rollout-*.jsonl.
 
 Relevant record types:
 - session_meta: payload.{id, cwd, model_provider, cli_version}
@@ -21,7 +21,31 @@ from pathlib import Path
 
 from .parse_claude import MessageRow, McpCallRow, SessionMeta, ParsedFile, _mcp_parse_name
 
+# Historical fallback, also retained for compatibility with existing imports.
 CODEX_ROOT = Path.home() / ".codex" / "sessions"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "sources.json"
+
+
+def session_roots() -> list[Path]:
+    """Reload configured Codex homes on each discovery, independent of cwd."""
+    try:
+        config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [CODEX_ROOT]
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in {CONFIG_PATH}: {exc}") from exc
+    homes = config.get("codex_homes") if isinstance(config, dict) else None
+    if not isinstance(homes, list) or any(
+        not isinstance(home, str) or not home.strip() for home in homes
+    ):
+        raise ValueError(f"{CONFIG_PATH}: codex_homes must be a list of non-empty paths")
+    roots = []
+    for home in homes:
+        path = Path(home).expanduser()
+        if not path.is_absolute():
+            path = CONFIG_PATH.parent / path
+        roots.append(path / "sessions")
+    return roots
 
 
 MEDIA = {'image', 'audio', 'image_url', 'input_image', 'output_image', 'input_audio', 'output_audio'}
@@ -278,6 +302,10 @@ def parse_file(path: Path, *, start_offset: int = 0, end_offset: int | None = No
 
 
 def discover_files() -> list[Path]:
-    if not CODEX_ROOT.exists():
-        return []
-    return sorted(CODEX_ROOT.glob("*/*/*/*.jsonl"))
+    # Keep original source paths for existing ingestion offsets; deduplicate aliases.
+    files: dict[Path, Path] = {}
+    for root in session_roots():
+        for path in sorted(root.glob("*/*/*/*.jsonl")):
+            if path.is_file():
+                files.setdefault(path.resolve(), path)
+    return sorted(files.values())
